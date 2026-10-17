@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>LaserPDF</title>
+    <link rel="icon" href="./favicon.png" />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var th = localStorage.getItem("laserpdf.theme") || "system";
+        if (th !== "system") document.documentElement.dataset.theme = th;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <header class="titlebar">
+        <div class="brand"></div>
+        <div class="tabs" role="tablist"></div>
+        <div class="title-actions"></div>
+      </header>
+      <nav class="toolbar" aria-label="toolbar"></nav>
+      <div class="propbar"></div>
+      <main class="workspace">
+        <aside class="sidebar"></aside>
+        <section class="stage">
+          <div class="welcome"></div>
+          <div class="drop-overlay"><div class="drop-card"></div></div>
+        </section>
+      </main>
+    </div>
+    <div id="toasts"></div>
+    <div id="busy"><div class="busy-card"><div class="spinner"></div><span class="busy-label"></span></div></div>
+    <div id="print-root"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
