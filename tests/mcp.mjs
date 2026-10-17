@@ -31,7 +31,7 @@ for (let i = 1; i <= 3; i++) {
 }
 const input = join(work, "input.pdf");
 writeFileSync(input, await doc.save());
-for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx"]) if (existsSync(join(work, n))) rmSync(join(work, n));
+for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf"]) if (existsSync(join(work, n))) rmSync(join(work, n));
 
 const child = spawn(exe, ["--mcp"], { stdio: ["pipe", "pipe", "inherit"] });
 const pending = new Map();
@@ -73,7 +73,7 @@ try {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const list = await request("tools/list", {});
   const names = list.result?.tools?.map((t) => t.name) ?? [];
-  check(names.length >= 10, `tools listed after the window loaded (${Date.now() - t0} ms): ${names.join(", ")}`);
+  check(names.length >= 14, `tools listed after the window loaded (${Date.now() - t0} ms): ${names.join(", ")}`);
 
   const info = await call("get_pdf_info", { path: input });
   check(/Pages: 3/.test(info.text) && /Gizli Yazar/.test(info.text), "get_pdf_info reports pages and author");
@@ -97,8 +97,21 @@ try {
   const rot = await call("rotate_pages", { path: input, degrees: 90, pages: "1", output: join(work, "rotated.pdf") });
   const rotated = await PDFDocument.load(new Uint8Array(await import("node:fs").then((fs) => fs.readFileSync(join(work, "rotated.pdf")))));
   check(!rot.isError && rotated.getPage(0).getRotation().angle === 90 && rotated.getPage(1).getRotation().angle === 0, "rotate_pages rotates only the chosen page");
-  const table = await call("table_to_excel", { path: input, page: 2, output: join(work, "table.xlsx") });
-  check(/3 rows x 3 columns/.test(table.text) && /Pencil \| 12 \| 1\.234,56/.test(table.text), "table_to_excel finds the 3 x 3 table");
+  const table = await call("export_table", { path: input, page: 2, output: join(work, "table.xlsx") });
+  check(/3 rows x 3 columns/.test(table.text) && /Pencil \| 12 \| 1\.234,56/.test(table.text), "export_table finds the 3 x 3 table");
+  const split = await call("split_pdf", { path: input, pages_per_file: 2, output_dir: work, base_name: "part" });
+  check(!split.isError && /into 2 file/.test(split.text) && existsSync(join(work, "part-02.pdf")), "split_pdf writes files of 2 pages");
+  const numbered = await call("add_page_numbers", { path: input, format: "Page {n} of {total}", position: "bottom-right", output: join(work, "numbered.pdf") });
+  const numberedText = await call("extract_text", { path: join(work, "numbered.pdf"), pages: "3" });
+  check(!numbered.isError && /Page 3 of 3/.test(numberedText.text), "add_page_numbers writes the page number into the file");
+  const marked = await call("add_watermark", { path: input, text: "DRAFT", pages: "1", output: join(work, "watermarked.pdf") });
+  const markedText = await call("extract_text", { path: join(work, "watermarked.pdf") });
+  check(!marked.isError && (markedText.text.match(/DRAFT/g) ?? []).length === 1, "add_watermark marks only the chosen page");
+  const comp = await call("compress_pdf", { path: input, quality: "low", output: join(work, "compressed.pdf") });
+  const compInfo = await call("get_pdf_info", { path: join(work, "compressed.pdf") });
+  check(!comp.isError && /Pages: 3/.test(compInfo.text) && /Pages without text/.test(compInfo.text), "compress_pdf writes the pages as images");
+  const badColor = await call("add_watermark", { path: input, text: "X", color: "red", output: join(work, "x.pdf") });
+  check(badColor.isError && /#1a2b3c/.test(badColor.text), "an invalid colour is a tool error");
   const bad = await call("extract_text", { path: join(work, "missing.pdf") });
   check(bad.isError && /cannot read/.test(bad.text), "a missing file is reported as a tool error");
   const unknown = await request("tools/call", { name: "nope", arguments: {} });

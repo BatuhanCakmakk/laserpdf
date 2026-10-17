@@ -303,28 +303,43 @@ export async function pageNumbersDialog(doc: DocSession, selected: string[], mea
   await ensureFonts();
   const sel = new Set(selected);
   const pages = range.value === "sel" ? doc.pages.filter((p) => sel.has(p.id)) : doc.pages;
+  const objs = pageNumberObjects(doc, pages, {
+    format: fmt.value, position: pos.value, start: Number(start.value) || 1, size: Number(size.value) || 10,
+    margin: Number(margin.value) || 0, color: color.value,
+  }, measure);
+  doc.change("objects", () => doc.objects.push(...objs));
+  return true;
+}
+
+export interface PageNumberOptions {
+  /** Text with {n} (page number) and {total} placeholders. */
+  format: string;
+  /** Two letters: t/b (top, bottom) and l/c/r (left, centre, right), e.g. "bc". */
+  position: string;
+  start: number;
+  size: number;
+  margin: number;
+  color: string;
+}
+
+/** Page number (or header/footer) text objects for the given pages. */
+export function pageNumberObjects(doc: DocSession, pages: PageRef[], opt: PageNumberOptions, measure: (o: TextObj) => void): TextObj[] {
   const total = doc.pages.length;
-  const first = Number(start.value) || 1;
-  const m = Number(margin.value) || 0;
-  const fs = Number(size.value) || 10;
-  const objs: TextObj[] = [];
-  pages.forEach((ref) => {
-    const n = doc.pages.indexOf(ref) + first;
-    const text = (fmt.value || "{n}").replaceAll("{n}", String(n)).replaceAll("{total}", String(total + first - 1));
+  return pages.map((ref) => {
+    const n = doc.pages.indexOf(ref) + opt.start;
+    const text = (opt.format || "{n}").replaceAll("{n}", String(n)).replaceAll("{total}", String(total + opt.start - 1));
     const o: TextObj = {
-      id: uid("o"), page: ref.id, type: "text", text, font: "sans", bold: false, italic: false, size: fs,
-      color: color.value, align: "center", bg: null, border: null, x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: 1,
+      id: uid("o"), page: ref.id, type: "text", text, font: "sans", bold: false, italic: false, size: opt.size,
+      color: opt.color, align: "center", bg: null, border: null, x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: 1,
     };
     measure(o);
     const { w: dw, h: dh } = displaySize(ref);
-    const p = pos.value;
-    const dx = p[1] === "c" ? (dw - o.w) / 2 : p[1] === "r" ? dw - m - o.w : m;
-    const dy = p[0] === "b" ? dh - m - o.h : m;
+    const p = opt.position;
+    const dx = p[1] === "c" ? (dw - o.w) / 2 : p[1] === "r" ? dw - opt.margin - o.w : opt.margin;
+    const dy = p[0] === "b" ? dh - opt.margin - o.h : opt.margin;
     Object.assign(o, uprightBox(ref, dx, dy, o.w, o.h));
-    objs.push(o);
+    return o;
   });
-  doc.change("objects", () => doc.objects.push(...objs));
-  return true;
 }
 
 // ---------------------------------------------------------------- watermark
@@ -347,21 +362,39 @@ export async function watermarkDialog(doc: DocSession, selected: string[], measu
   await ensureFonts();
   const sel = new Set(selected);
   const pages = range.value === "sel" ? doc.pages.filter((p) => sel.has(p.id)) : doc.pages;
-  const objs: TextObj[] = pages.map((ref) => {
+  const objs = watermarkObjects(pages, {
+    text: text.value, size: Number(size.value) || 64, angle: Number(angle.value) || 0,
+    opacity: (Number(opacity.value) || 20) / 100, color: colorIn.value,
+  }, measure);
+  doc.change("objects", () => doc.objects.push(...objs));
+  return true;
+}
+
+export interface WatermarkOptions {
+  text: string;
+  size: number;
+  /** Degrees, counter-clockwise as displayed (negative values go up to the right). */
+  angle: number;
+  /** 0.05 to 1. */
+  opacity: number;
+  color: string;
+}
+
+/** A centred, rotated watermark text object for each page. */
+export function watermarkObjects(pages: PageRef[], opt: WatermarkOptions, measure: (o: TextObj) => void): TextObj[] {
+  return pages.map((ref) => {
     const o: TextObj = {
-      id: uid("o"), page: ref.id, type: "text", text: text.value, font: "sans", bold: true, italic: false,
-      size: Number(size.value) || 64, color: colorIn.value, align: "center", bg: null, border: null,
-      x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: Math.min(1, Math.max(0.05, (Number(opacity.value) || 20) / 100)),
+      id: uid("o"), page: ref.id, type: "text", text: opt.text, font: "sans", bold: true, italic: false,
+      size: opt.size, color: opt.color, align: "center", bg: null, border: null,
+      x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: Math.min(1, Math.max(0.05, opt.opacity)),
     };
     measure(o);
     const { w: dw, h: dh } = displaySize(ref);
     const box = uprightBox(ref, (dw - o.w) / 2, (dh - o.h) / 2, o.w, o.h);
     Object.assign(o, box);
-    o.rot = (((box.rot + (Number(angle.value) || 0)) % 360) + 360) % 360;
+    o.rot = (((box.rot + opt.angle) % 360) + 360) % 360;
     return o;
   });
-  doc.change("objects", () => doc.objects.push(...objs));
-  return true;
 }
 
 // --------------------------------------------------------------- properties

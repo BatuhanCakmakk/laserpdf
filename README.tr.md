@@ -99,13 +99,17 @@ LaserPDF, `--mcp` ile başlatıldığında pencere açmadan bir [Model Context P
 | `get_pdf_info` | Sayfa sayısı, boyut, başlık, yazar ve diğer özellikler |
 | `extract_text` | Tüm sayfaların veya seçili sayfaların metni |
 | `search_pdf` | Kelime veya ifade arama, sayfa numaralarıyla |
-| `ocr_pdf` | Taranmış sayfaları tanıyıp aranabilir PDF kaydetme (Türkçe ve İngilizce) |
+| `recognize_text` | Taranmış sayfaları tanıyıp aranabilir PDF kaydetme (Türkçe ve İngilizce) |
 | `redact_pdf` | Kelimeleri siyah veya beyaz kutuyla karartıp dosyadan silme |
 | `remove_metadata` | Yazar, program, tarih, XMP ve fotoğraf konum bilgilerini silme |
 | `merge_pdfs` | PDF'leri ve görselleri tek PDF'te birleştirme |
 | `extract_pages` | Seçili sayfaları yeni PDF olarak kaydetme |
+| `split_pdf` | PDF'i N sayfalık dosyalara bölme |
 | `rotate_pages` | Tüm veya seçili sayfaları döndürme |
-| `table_to_excel` | Sayfadaki bir tabloyu .xlsx olarak kaydetme |
+| `add_page_numbers` | Sayfa numarası ya da `Sayfa {n} / {total}` gibi üst/alt bilgi |
+| `add_watermark` | Sayfalara GİZLİ gibi büyük, yarı saydam bir yazı |
+| `compress_pdf` | Taranmış ve görsel ağırlıklı PDF'leri küçültme (sayfalar görüntüye çevrilir) |
+| `export_table` | Sayfadaki bir tabloyu .xlsx olarak kaydetme |
 
 Dosya yazan araçlar yalnızca verilen `output` yoluna yazar ve var olan bir dosyanın üzerine `overwrite: true` olmadan yazmaz.
 

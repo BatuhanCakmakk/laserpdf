@@ -5,11 +5,15 @@ import { listen } from "@tauri-apps/api/event";
 import { DocSession } from "./doc";
 import { charOffsets, getTextItems } from "./engine";
 import { exportPdf } from "./export";
-import type { PageRef, ShapeObj } from "./model";
+import type { PageRef, ShapeObj, TextObj } from "./model";
 import { uid } from "./model";
 import { insertFiles, isImageFile, rotatePages } from "./pages";
 import { baseName, readPath, writePath } from "./platform";
 import { fold } from "./search";
+import { pageNumberObjects, watermarkObjects } from "./dialogs";
+import { ensureFonts } from "./fonts";
+import { applyTextStyle } from "./objects";
+import { resizeFromTopLeft } from "./interact";
 
 interface Tool {
   name: string;
@@ -130,11 +134,38 @@ const pdfDate = (v: unknown) => {
   return m ? `${m[1]}-${m[2] ?? "01"}-${m[3] ?? "01"}${m[4] ? ` ${m[4]}:${m[5] ?? "00"}` : ""}` : "";
 };
 
+/** Sizes a text object's box to its text, as the editor does (fonts must be loaded first). */
+function measure(o: TextObj): void {
+  const probe = document.createElement("div");
+  probe.className = "obj-text measure";
+  probe.textContent = o.text || " ";
+  applyTextStyle(probe, o, 1);
+  document.body.append(probe);
+  resizeFromTopLeft(o, probe.offsetWidth, probe.offsetHeight);
+  probe.remove();
+}
+
+const colorArg = (description: string) => ({ type: "string", description: `${description}, as #rrggbb.` });
+const color = (v: unknown, fallback: string) => {
+  if (v === undefined || v === null || v === "") return fallback;
+  if (typeof v !== "string" || !/^#[0-9a-f]{6}$/i.test(v)) throw new ToolError(`colour must look like #1a2b3c, not ${v}`);
+  return v;
+};
+const number = (v: unknown, fallback: number, min: number, max: number, name: string) => {
+  if (v === undefined || v === null || v === "") {
+    if (Number.isNaN(fallback)) throw new ToolError(`${name} is required`);
+    return fallback;
+  }
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < min || n > max) throw new ToolError(`${name} must be between ${min} and ${max}`);
+  return n;
+};
+
 const tools: Tool[] = [
   {
     name: "get_pdf_info",
     title: "PDF information",
-    description: "Page count and sizes, document information (title, author, creating program, dates), and which pages have no text (scans that need ocr_pdf).",
+    description: "Page count and sizes, document information (title, author, creating program, dates), and which pages have no text (scans that need recognize_text).",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), password: passwordArg }, required: ["path"] },
     annotations: { readOnlyHint: true },
     async run(a) {
@@ -158,7 +189,7 @@ const tools: Tool[] = [
         ...(md.CreationDate ? [`Created: ${pdfDate(md.CreationDate)}`] : []),
         ...(md.ModDate ? [`Modified: ${pdfDate(md.ModDate)}`] : []),
         `Encrypted: ${src.password !== undefined ? "yes" : "no"}`,
-        noText.length ? `Pages without text (scanned, use ocr_pdf): ${noText.join(", ")}` : "All pages have text.",
+        noText.length ? `Pages without text (scanned, use recognize_text): ${noText.join(", ")}` : "All pages have text.",
       ].join("\n");
     },
   },
@@ -175,7 +206,7 @@ const tools: Tool[] = [
       for (const ref of pickPages(doc, a.pages)) {
         const n = doc.pages.indexOf(ref) + 1;
         const text = await pageText(doc, ref);
-        parts.push(`--- Page ${n} ---\n${text || "(no text on this page; if it is scanned, run ocr_pdf first)"}`);
+        parts.push(`--- Page ${n} ---\n${text || "(no text on this page; if it is scanned, run recognize_text first)"}`);
         size += text.length;
         if (size > 400_000) {
           parts.push(`--- Stopped after page ${n}: the text is very long; ask for fewer pages ---`);
@@ -199,7 +230,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: "ocr_pdf",
+    name: "recognize_text",
     title: "Recognize text (OCR)",
     description: "Recognizes the text of scanned pages (Turkish and English, offline) and writes a copy whose text can be searched, selected and copied. Pages that already have text are left as they are. Scans below 150 dpi are skipped unless force is true, as their text is mostly misread.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF or image."), pages: pagesArg, force: { type: "boolean", description: "Also recognize low-resolution scans." }, password: passwordArg, ...outputArgs }, required: ["path", "output"] },
@@ -342,9 +373,9 @@ const tools: Tool[] = [
     },
   },
   {
-    name: "table_to_excel",
+    name: "export_table",
     title: "Export a table to Excel",
-    description: "Reads the table on a page and writes it as an .xlsx workbook. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts become numbers, codes and dates stay text. Scanned pages need ocr_pdf first.",
+    description: "Reads the table on a page and writes it as an .xlsx workbook. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts become numbers, codes and dates stay text. Scanned pages need recognize_text first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -368,11 +399,143 @@ const tools: Tool[] = [
       // Without an area: the ruled table on the page, or else the whole page.
       const area = a.area ? { x: +ar.x || 0, y: +ar.y || 0, w: +ar.width || ref.w, h: +ar.height || ref.h } : (ruledArea(rules) ?? { x: 0, y: 0, w: ref.w, h: ref.h });
       const rows = buildTable(await getTextItems(await src.pdf.getPage(ref.index + 1)), area, rules);
-      if (!rows.length) throw new ToolError("no text in that area; if the page is scanned, run ocr_pdf first");
+      if (!rows.length) throw new ToolError("no text in that area; if the page is scanned, run recognize_text first");
       const out = await save(a, xlsx(rows, `Page ${a.page}`));
       const cols = Math.max(...rows.map((r) => r.length));
       const preview = rows.slice(0, 8).map((r) => r.map((c) => c.text).join(" | ")).join("\n");
       return `Wrote ${rows.length} rows x ${cols} columns to ${out}.\nFirst rows:\n${preview}`;
+    },
+  },
+  {
+    name: "split_pdf",
+    title: "Split a PDF",
+    description: "Splits a PDF into files of a given number of pages each, named <base>-01.pdf, <base>-02.pdf, ... in an existing folder. For specific pages, use extract_pages.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: path("Absolute path of the PDF."),
+        pages_per_file: { type: "number", description: "Pages in each file (at least 1)." },
+        output_dir: path("Absolute path of an existing folder for the new files."),
+        base_name: { type: "string", description: "Start of the file names (default: the PDF's name)." },
+        overwrite: outputArgs.overwrite,
+        password: passwordArg,
+      },
+      required: ["path", "pages_per_file", "output_dir"],
+    },
+    async run(a) {
+      const n = Math.floor(number(a.pages_per_file, NaN, 1, 100_000, "pages_per_file"));
+      if (typeof a.output_dir !== "string" || !a.output_dir) throw new ToolError("output_dir is required");
+      const doc = await open(a.path, a.password);
+      const dir = a.output_dir.replace(/[\\/]+$/, "");
+      const sep = dir.includes("\\") ? "\\" : "/";
+      const base = (typeof a.base_name === "string" && a.base_name.trim() ? a.base_name.trim() : baseName(String(a.path))).replace(/\.pdf$/i, "");
+      const names: string[] = [];
+      for (let i = 0, k = 1; i < doc.pages.length; i += n, k++) names.push(`${dir}${sep}${base}-${String(k).padStart(2, "0")}.pdf`);
+      if (a.overwrite !== true) {
+        for (const f of names) {
+          if (await invoke<boolean>("mcp_file_exists", { path: f })) throw new ToolError(`${f} already exists; pass overwrite: true to replace it`);
+        }
+      }
+      for (const [k, f] of names.entries()) await writePath(f, await exportDoc(doc, { pages: doc.pages.slice(k * n, k * n + n) }));
+      return `Split ${doc.pages.length} page(s) into ${names.length} file(s):\n${names.join("\n")}`;
+    },
+  },
+  {
+    name: "add_page_numbers",
+    title: "Add page numbers",
+    description: 'Writes page numbers, or a header/footer such as "Confidential - Page {n} of {total}", on every page or the selected pages.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: path("Absolute path of the PDF."),
+        format: { type: "string", description: 'Text with {n} for the page number and {total} for the page count (default "{n}").' },
+        position: { type: "string", enum: ["bottom-center", "bottom-right", "bottom-left", "top-center", "top-right", "top-left"], description: "Default bottom-center." },
+        start: { type: "number", description: "Number of the first page (default 1)." },
+        font_size: { type: "number", description: "Default 10." },
+        margin: { type: "number", description: "Distance from the page edge in points (default 24)." },
+        color: colorArg("Text colour (default dark grey)"),
+        pages: pagesArg,
+        password: passwordArg,
+        ...outputArgs,
+      },
+      required: ["path", "output"],
+    },
+    async run(a) {
+      const m = /^(top|bottom)-(left|center|right)$/.exec(String(a.position ?? "bottom-center"));
+      if (!m) throw new ToolError("position must be like bottom-center or top-right");
+      const format = typeof a.format === "string" && a.format.trim() ? a.format : "{n}";
+      const opt = {
+        format, position: m[1][0] + m[2][0], start: number(a.start, 1, 0, 1_000_000, "start"),
+        size: number(a.font_size, 10, 4, 144, "font_size"), margin: number(a.margin, 24, 0, 500, "margin"), color: color(a.color, "#333333"),
+      };
+      const doc = await open(a.path, a.password);
+      await ensureFonts(format);
+      const refs = pickPages(doc, a.pages);
+      doc.objects.push(...pageNumberObjects(doc, refs, opt, measure));
+      const out = await save(a, await exportDoc(doc));
+      return `Added page numbers to ${refs.length} page(s); saved to ${out}.`;
+    },
+  },
+  {
+    name: "add_watermark",
+    title: "Add a watermark",
+    description: "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the selected pages.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: path("Absolute path of the PDF."),
+        text: { type: "string", description: "Watermark text." },
+        font_size: { type: "number", description: "Default 64." },
+        angle: { type: "number", description: "Rotation in degrees; negative values rise to the right (default -45)." },
+        opacity: { type: "number", description: "0.05 to 1 (default 0.2)." },
+        color: colorArg("Text colour (default red)"),
+        pages: pagesArg,
+        password: passwordArg,
+        ...outputArgs,
+      },
+      required: ["path", "text", "output"],
+    },
+    async run(a) {
+      const text = typeof a.text === "string" ? a.text.trim() : "";
+      if (!text) throw new ToolError("text is required");
+      const opt = {
+        text, size: number(a.font_size, 64, 8, 400, "font_size"), angle: number(a.angle, -45, -360, 360, "angle"),
+        opacity: number(a.opacity, 0.2, 0.05, 1, "opacity"), color: color(a.color, "#e5484d"),
+      };
+      const doc = await open(a.path, a.password);
+      await ensureFonts(text);
+      const refs = pickPages(doc, a.pages);
+      doc.objects.push(...watermarkObjects(refs, opt, measure));
+      const out = await save(a, await exportDoc(doc));
+      return `Added the watermark to ${refs.length} page(s); saved to ${out}.`;
+    },
+  },
+  {
+    name: "compress_pdf",
+    title: "Compress a PDF",
+    description: "Makes a PDF smaller by turning every page into a JPEG image at the chosen quality. Best for scans and image-heavy files; the text is no longer selectable afterwards (run recognize_text on the result to make it searchable again).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: path("Absolute path of the PDF."),
+        quality: { type: "string", enum: ["low", "medium", "high"], description: "low: 96 dpi, smallest; medium: 144 dpi (default); high: 200 dpi." },
+        password: passwordArg,
+        ...outputArgs,
+      },
+      required: ["path", "output"],
+    },
+    async run(a) {
+      const q = String(a.quality ?? "medium");
+      const opt = q === "low" ? { dpi: 96, quality: 0.55 } : q === "high" ? { dpi: 200, quality: 0.85 } : q === "medium" ? { dpi: 144, quality: 0.72 } : null;
+      if (!opt) throw new ToolError("quality must be low, medium or high");
+      const doc = await open(a.path, a.password);
+      const before = await exportDoc(doc);
+      const { rasterizePdf } = await import("./output");
+      const bytes = await rasterizePdf(before, opt.dpi, opt.quality);
+      const out = await save(a, bytes);
+      const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+      const note = bytes.length >= before.length ? " The result is not smaller: this PDF is mostly text and vector graphics, so the original is the better choice." : "";
+      return `Saved to ${out}: ${kb(before.length)} -> ${kb(bytes.length)}.${note}`;
     },
   },
 ];

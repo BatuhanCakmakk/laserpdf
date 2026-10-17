@@ -99,13 +99,17 @@ Started with `--mcp`, LaserPDF runs as a [Model Context Protocol](https://modelc
 | `get_pdf_info` | Page count, size, title, author and other properties |
 | `extract_text` | Text of all or selected pages |
 | `search_pdf` | Find words or phrases, with page numbers |
-| `ocr_pdf` | Recognize scanned pages (English and Turkish) and save a searchable PDF |
+| `recognize_text` | Recognize scanned pages (English and Turkish) and save a searchable PDF |
 | `redact_pdf` | Black out or white out words and remove them from the file |
 | `remove_metadata` | Remove author, programs, dates, XMP and photo location data |
 | `merge_pdfs` | Join PDFs and images into one PDF |
 | `extract_pages` | Save selected pages as a new PDF |
+| `split_pdf` | Split a PDF into files of N pages |
 | `rotate_pages` | Rotate all or selected pages |
-| `table_to_excel` | Save a table from a page as .xlsx |
+| `add_page_numbers` | Page numbers or a header/footer such as `Page {n} of {total}` |
+| `add_watermark` | A large, semi-transparent text such as CONFIDENTIAL across the pages |
+| `compress_pdf` | Make scans and image-heavy PDFs smaller (pages become images) |
+| `export_table` | Save a table from a page as .xlsx |
 
 Tools that write files only write to the `output` path they are given and never overwrite an existing file unless `overwrite: true` is set.
 
