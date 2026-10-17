@@ -561,6 +561,10 @@ async function handle(msg: { id: unknown; method: string; params?: Record<string
 }
 
 export async function startMcp(): Promise<void> {
+  // The window is never shown, and WebKit (Linux, macOS) does not run animation frames for it, which
+  // would stall pdf.js page rendering (compress, OCR, flattening). A timer does the same job here.
+  window.requestAnimationFrame = (cb) => window.setTimeout(() => cb(performance.now()), 0);
+  window.cancelAnimationFrame = (id) => window.clearTimeout(id);
   await listen<string>("mcp-request", async (e) => {
     let msg: { id: unknown; method: string; params?: Record<string, unknown> };
     try {

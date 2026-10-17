@@ -110,6 +110,11 @@ try {
   const comp = await call("compress_pdf", { path: input, quality: "low", output: join(work, "compressed.pdf") });
   const compInfo = await call("get_pdf_info", { path: join(work, "compressed.pdf") });
   check(!comp.isError && /Pages: 3/.test(compInfo.text) && /Pages without text/.test(compInfo.text), "compress_pdf writes the pages as images");
+  // A scan-like copy (pages as images) to recognize again.
+  await call("compress_pdf", { path: join(work, "pages.pdf"), quality: "high", output: join(work, "scanned.pdf"), overwrite: true });
+  const ocr = await call("recognize_text", { path: join(work, "scanned.pdf"), output: join(work, "recognized.pdf"), overwrite: true });
+  const ocrText = await call("extract_text", { path: join(work, "recognized.pdf") });
+  check(!ocr.isError && /report/i.test(ocrText.text), "recognize_text makes a scanned copy searchable again");
   const badColor = await call("add_watermark", { path: input, text: "X", color: "red", output: join(work, "x.pdf") });
   check(badColor.isError && /#1a2b3c/.test(badColor.text), "an invalid colour is a tool error");
   const bad = await call("extract_text", { path: join(work, "missing.pdf") });
