@@ -28,7 +28,7 @@ import { displaySize, uid } from "./model";
 import { PasswordCancelled, getTextItems } from "./engine";
 import { ensureFonts } from "./fonts";
 
-export const VERSION = "1.0.5";
+export const VERSION = "1.0.6";
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 interface ToolDef {
