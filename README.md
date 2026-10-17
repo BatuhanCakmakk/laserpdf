@@ -124,6 +124,8 @@ Tools that write files only write to the `output` path they are given and never 
 
 `"command": "laserpdf"` works with the Microsoft Store version. If you used the installer, give the full path instead, e.g. `"C:\\Users\\<you>\\AppData\\Local\\LaserPDF\\laserpdf.exe"` (backslashes are doubled in JSON).
 
+The [Dockerfile](Dockerfile) runs the Linux build as an MCP server in a container (with a virtual display), for MCP directories and clients that start servers that way.
+
 ## Privacy
 
 LaserPDF works offline. It has no account, no ads, no analytics and makes no network requests; your files stay on your PC. When you connect it to an AI assistant over MCP, the assistant receives the results of the tools it calls, and what it does with them is governed by that assistant's own privacy terms.
@@ -159,6 +161,7 @@ src/
   export.ts     Saving with pdf-lib (writes objects into the PDF content)
   erase.ts      Removes edited and redacted text from page content streams
   meta.ts       Hidden information removal, JPEG metadata stripping
+  stream-iterator.ts  Stream iteration for WebKit webviews (Linux, macOS)
   ocr.ts        Text recognition (Tesseract) and the invisible text layer
   table.ts      Table detection and .xlsx writing
   mcp.ts        MCP tools (runs in a hidden window in --mcp mode)

@@ -124,6 +124,8 @@ Dosya yazan araçlar yalnızca verilen `output` yoluna yazar ve var olan bir dos
 
 `"command": "laserpdf"` Microsoft Store sürümünde çalışır. Kurulum dosyasıyla kurduysanız tam yolu yazın, ör. `"C:\\Users\\<ad>\\AppData\\Local\\LaserPDF\\laserpdf.exe"` (JSON'da ters eğik çizgiler çift yazılır).
 
+[Dockerfile](Dockerfile), Linux sürümünü bir kapsayıcıda (sanal ekranla) MCP sunucusu olarak çalıştırır; sunucuları bu şekilde başlatan MCP dizinleri ve istemcileri içindir.
+
 ## Gizlilik
 
 LaserPDF çevrimdışı çalışır. Hesap, reklam ve analitik yoktur, ağ isteği yapmaz; dosyalarınız bilgisayarınızda kalır. MCP ile bir yapay zekâ asistanına bağladığınızda asistan, çağırdığı araçların sonuçlarını alır; bunları nasıl kullandığı o asistanın gizlilik koşullarına bağlıdır.

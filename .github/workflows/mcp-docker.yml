@@ -1,0 +1,49 @@
+name: MCP server on Linux
+
+# Builds the Linux package from this commit, runs every MCP tool on Linux (WebKitGTK), and checks that
+# the Dockerfile used by MCP directories starts the server and answers.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  linux-mcp:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - run: npm ci
+      - name: Build the Linux package
+        run: npx tauri build --bundles deb
+      - name: All MCP tools on Linux
+        run: xvfb-run -a node tests/mcp.mjs src-tauri/target/release/laserpdf /tmp/mcpwork
+      - name: Build the Docker image with this package
+        run: |
+          mkdir -p /tmp/deb && cp src-tauri/target/release/bundle/deb/*.deb /tmp/deb/laserpdf.deb
+          (cd /tmp/deb && python3 -m http.server 8765 >/dev/null 2>&1 &)
+          sleep 1
+          docker build --network host --build-arg DEB_URL=http://127.0.0.1:8765/laserpdf.deb -t laserpdf-mcp .
+      - name: Make a sample PDF
+        run: |
+          mkdir -p /tmp/mcpdata
+          node -e "
+            const { PDFDocument, StandardFonts } = require('pdf-lib');
+            (async () => {
+              const d = await PDFDocument.create();
+              const f = await d.embedFont(StandardFonts.Helvetica);
+              d.addPage([595, 842]).drawText('Hello from Docker', { x: 60, y: 760, size: 18, font: f });
+              require('fs').writeFileSync('/tmp/mcpdata/sample.pdf', await d.save());
+            })();"
+      - name: Talk to the server in Docker
+        run: node tests/mcp-docker.mjs laserpdf-mcp /tmp/mcpdata

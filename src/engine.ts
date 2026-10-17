@@ -1,7 +1,8 @@
+import "./stream-iterator";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import type { FontFamily } from "./model";
-import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+import workerUrl from "./pdf-worker?worker&url";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
