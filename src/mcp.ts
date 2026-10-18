@@ -169,7 +169,7 @@ const tools: Tool[] = [
     title: "PDF information",
     description: "Page count and sizes, document information (title, author, creating program, dates), and which pages have no text (scans that need recognize_text).",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), password: passwordArg }, required: ["path"] },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
       const doc = await open(a.path, a.password);
       const src = [...doc.sources.values()][0];
@@ -223,7 +223,7 @@ const tools: Tool[] = [
     title: "Search text",
     description: "Finds a word or phrase in a PDF (case-insensitive by default, Turkish İ/ı aware) and lists the pages and lines where it occurs.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), query: str, match_case: { type: "boolean" }, password: passwordArg }, required: ["path", "query"] },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
       const doc = await open(a.path, a.password);
       const hits = await find(doc, doc.pages, String(a.query ?? ""), a.match_case === true);
@@ -265,8 +265,8 @@ const tools: Tool[] = [
     name: "redact_pdf",
     title: "Redact text",
     description: "Covers every occurrence of the given words or phrases with a box and removes the text underneath from the file (not just hides it). Pages where something under a box cannot be removed (images, scans) are converted to images when flatten_unsafe is true, otherwise reported.",
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -335,8 +335,8 @@ const tools: Tool[] = [
   {
     name: "merge_pdfs",
     title: "Merge PDFs",
-    description: "Joins several PDFs and images (JPEG, PNG, WebP, ...) into one new PDF, in the order given; every image becomes a page of its own size. Use split_pdf or extract_pages for the opposite. The inputs are not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be merged.",
-    inputSchema: { type: "object", properties: { paths: { type: "array", items: str, description: "Absolute paths, in order." }, ...outputArgs }, required: ["paths", "output"] },
+    description: "Joins several PDFs and images (JPEG, PNG, WebP, GIF, BMP, AVIF) into one new PDF, in the order given: all pages of each PDF, and each image centred on an A4 page of its own. Use it to combine documents or turn photos and scans into a PDF; to take pages out, use extract_pages or split_pdf, and to turn pages into images, use pdf_to_images. The inputs are not changed, and an existing output file is only replaced with overwrite: true. Fails with a message when a path cannot be read, when no file is a PDF or image, and for encrypted PDFs; other files in the list are skipped.",
+    inputSchema: { type: "object", properties: { paths: { type: "array", items: str, description: "Absolute paths of the PDFs and images, in the order wanted (at least one)." }, ...outputArgs }, required: ["paths", "output"] },
     annotations: writeHints,
     async run(a) {
       const paths = Array.isArray(a.paths) ? a.paths.map(String) : [];
@@ -384,8 +384,8 @@ const tools: Tool[] = [
     name: "export_table",
     title: "Export a table to Excel",
     description: "Reads the table on a page and writes it as an .xlsx workbook. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts become numbers, codes and dates stay text. Scanned pages need recognize_text first.",
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -419,8 +419,8 @@ const tools: Tool[] = [
     name: "split_pdf",
     title: "Split a PDF",
     description: "Splits a PDF into files of a given number of pages each, named <base>-01.pdf, <base>-02.pdf, ... in an existing folder. For specific pages, use extract_pages.",
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -454,8 +454,8 @@ const tools: Tool[] = [
     name: "add_page_numbers",
     title: "Add page numbers",
     description: 'Writes page numbers, or a header/footer such as "Confidential - Page {n} of {total}", on every page or the selected pages.',
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -491,8 +491,8 @@ const tools: Tool[] = [
     name: "add_watermark",
     title: "Add a watermark",
     description: "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the selected pages.",
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -526,8 +526,8 @@ const tools: Tool[] = [
     name: "compress_pdf",
     title: "Compress a PDF",
     description: "Makes a PDF smaller by turning every page into a JPEG image at the chosen quality. Best for scans and image-heavy files; the text is no longer selectable afterwards (run recognize_text on the result to make it searchable again).",
-    inputSchema: {
     annotations: writeHints,
+    inputSchema: {
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -549,6 +549,53 @@ const tools: Tool[] = [
       const kb = (n: number) => `${Math.round(n / 1024)} KB`;
       const note = bytes.length >= before.length ? " The result is not smaller: this PDF is mostly text and vector graphics, so the original is the better choice." : "";
       return `Saved to ${out}: ${kb(before.length)} -> ${kb(bytes.length)}.${note}`;
+    },
+  },
+  {
+    name: "pdf_to_images",
+    title: "Save pages as images",
+    description: "Saves every page, or the chosen pages, of a PDF as PNG or JPEG images named <base>-01.png, <base>-02.png, ... (by page number) in an existing folder, and lists the files with their pixel sizes. Use it to share a page as a picture, insert it into a slide or chat, or look at a page's layout; to read the text, use extract_text, and to make a smaller PDF, use compress_pdf. The PDF is not changed; existing images are only replaced with overwrite: true. Encrypted PDFs cannot be converted.",
+    annotations: writeHints,
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: path("Absolute path of the PDF."),
+        output_dir: path("Absolute path of an existing folder for the images."),
+        pages: pagesArg,
+        format: { type: "string", enum: ["png", "jpeg"], description: "png (default) is sharp for text and drawings; jpeg is smaller for photos and scans." },
+        dpi: { type: "number", description: "Resolution, 36 to 600 (default 150; 72 is screen size, 300 is print quality)." },
+        base_name: { type: "string", description: "Start of the file names (default: the PDF's name)." },
+        overwrite: outputArgs.overwrite,
+        password: passwordArg,
+      },
+      required: ["path", "output_dir"],
+    },
+    async run(a) {
+      if (typeof a.output_dir !== "string" || !a.output_dir) throw new ToolError("output_dir is required");
+      const format = String(a.format ?? "png");
+      if (format !== "png" && format !== "jpeg") throw new ToolError("format must be png or jpeg");
+      const dpi = number(a.dpi, 150, 36, 600, "dpi");
+      const doc = await open(a.path, a.password);
+      const refs = pickPages(doc, a.pages);
+      const dir = a.output_dir.replace(/[\\/]+$/, "");
+      const sep = dir.includes("\\") ? "\\" : "/";
+      const base = (typeof a.base_name === "string" && a.base_name.trim() ? a.base_name.trim() : baseName(String(a.path))).replace(/\.pdf$/i, "");
+      const width = Math.max(2, String(doc.pages.length).length);
+      const ext = format === "png" ? "png" : "jpg";
+      const names = refs.map((r) => `${dir}${sep}${base}-${String(doc.pages.indexOf(r) + 1).padStart(width, "0")}.${ext}`);
+      if (a.overwrite !== true) {
+        for (const f of names) {
+          if (await invoke<boolean>("mcp_file_exists", { path: f })) throw new ToolError(`${f} already exists; pass overwrite: true to replace it`);
+        }
+      }
+      const { renderPdfToImages } = await import("./output");
+      const images = await renderPdfToImages(await exportDoc(doc, { pages: refs }), dpi, format === "png" ? "image/png" : "image/jpeg", 0.88);
+      const lines: string[] = [];
+      for (const [k, im] of images.entries()) {
+        await writePath(names[k], new Uint8Array(await im.blob.arrayBuffer()));
+        lines.push(`${names[k]} (${im.width} x ${im.height})`);
+      }
+      return `Saved ${images.length} page(s) as ${format.toUpperCase()} at ${dpi} dpi:\n${lines.join("\n")}`;
     },
   },
 ];

@@ -109,6 +109,7 @@ LaserPDF, `--mcp` ile başlatıldığında pencere açmadan bir [Model Context P
 | `add_page_numbers` | Sayfa numarası ya da `Sayfa {n} / {total}` gibi üst/alt bilgi |
 | `add_watermark` | Sayfalara GİZLİ gibi büyük, yarı saydam bir yazı |
 | `compress_pdf` | Taranmış ve görsel ağırlıklı PDF'leri küçültme (sayfalar görüntüye çevrilir) |
+| `pdf_to_images` | Sayfaları PNG veya JPEG görüntü olarak kaydetme |
 | `export_table` | Sayfadaki bir tabloyu .xlsx olarak kaydetme |
 
 Dosya yazan araçlar yalnızca verilen `output` yoluna yazar ve var olan bir dosyanın üzerine `overwrite: true` olmadan yazmaz.

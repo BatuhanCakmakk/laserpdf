@@ -2,7 +2,7 @@
 // Usage: node tests/mcp.mjs <laserpdf.exe> <workDir>
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
@@ -31,7 +31,7 @@ for (let i = 1; i <= 3; i++) {
 }
 const input = join(work, "input.pdf");
 writeFileSync(input, await doc.save());
-for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf"]) if (existsSync(join(work, n))) rmSync(join(work, n));
+for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf", "img-01.png", "img-03.png", "img-03.jpg"]) if (existsSync(join(work, n))) rmSync(join(work, n));
 
 const child = spawn(exe, ["--mcp"], { stdio: ["pipe", "pipe", "inherit"] });
 const pending = new Map();
@@ -73,7 +73,7 @@ try {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const list = await request("tools/list", {});
   const names = list.result?.tools?.map((t) => t.name) ?? [];
-  check(names.length >= 14, `tools listed after the window loaded (${Date.now() - t0} ms): ${names.join(", ")}`);
+  check(names.length >= 15, `tools listed after the window loaded (${Date.now() - t0} ms): ${names.join(", ")}`);
 
   const info = await call("get_pdf_info", { path: input });
   check(/Pages: 3/.test(info.text) && /Gizli Yazar/.test(info.text), "get_pdf_info reports pages and author");
@@ -116,6 +116,14 @@ try {
   const ocr = await call("recognize_text", { path: join(work, "scanned.pdf"), output: join(work, "recognized.pdf"), overwrite: true });
   const ocrText = await call("extract_text", { path: join(work, "recognized.pdf") });
   check(!ocr.isError && /report/i.test(ocrText.text), "recognize_text makes a scanned copy searchable again");
+  const imgs = await call("pdf_to_images", { path: input, pages: "1,3", dpi: 72, output_dir: work, base_name: "img" });
+  check(!imgs.isError && /595 x 842/.test(imgs.text) && existsSync(join(work, "img-03.png")) && !existsSync(join(work, "img-02.png")), "pdf_to_images saves the chosen pages as PNG at the page size");
+  const png = readFileSync(join(work, "img-01.png"));
+  check(png.subarray(1, 4).toString() === "PNG" && png.readUInt32BE(16) === 595, "the image is a real PNG of the right width");
+  const jpg = await call("pdf_to_images", { path: input, pages: "3", format: "jpeg", dpi: 150, output_dir: work, base_name: "img" });
+  check(!jpg.isError && readFileSync(join(work, "img-03.jpg"))[0] === 0xff, "pdf_to_images also writes JPEG");
+  const again2 = await call("pdf_to_images", { path: input, pages: "1", output_dir: work, base_name: "img" });
+  check(again2.isError && /already exists/.test(again2.text), "pdf_to_images does not replace images without overwrite: true");
   const badColor = await call("add_watermark", { path: input, text: "X", color: "red", output: join(work, "x.pdf") });
   check(badColor.isError && /#1a2b3c/.test(badColor.text), "an invalid colour is a tool error");
   const bad = await call("extract_text", { path: join(work, "missing.pdf") });

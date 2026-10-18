@@ -71,7 +71,7 @@ fn handle(app: &AppHandle, line: &str) {
                         "protocolVersion": version,
                         "capabilities": { "tools": {} },
                         "serverInfo": { "name": "laserpdf", "title": "LaserPDF", "version": app.package_info().version.to_string() },
-                        "instructions": "Offline PDF tools: read text, search, recognize text in scans (Turkish and English), redact, remove hidden information, merge, split, extract and rotate pages, add page numbers and watermarks, compress, export tables to Excel. Paths are absolute paths on this computer. Tools that write need an output path and never overwrite a file unless overwrite is true."
+                        "instructions": "Offline PDF tools: read text, search, recognize text in scans (Turkish and English), redact, remove hidden information, merge, split, extract and rotate pages, add page numbers and watermarks, compress, save pages as images, export tables to Excel. Paths are absolute paths on this computer. Tools that write need an output path and never overwrite a file unless overwrite is true."
                     }
                 })
                 .to_string(),

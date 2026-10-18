@@ -109,6 +109,7 @@ Started with `--mcp`, LaserPDF runs as a [Model Context Protocol](https://modelc
 | `add_page_numbers` | Page numbers or a header/footer such as `Page {n} of {total}` |
 | `add_watermark` | A large, semi-transparent text such as CONFIDENTIAL across the pages |
 | `compress_pdf` | Make scans and image-heavy PDFs smaller (pages become images) |
+| `pdf_to_images` | Save pages as PNG or JPEG images |
 | `export_table` | Save a table from a page as .xlsx |
 
 Tools that write files only write to the `output` path they are given and never overwrite an existing file unless `overwrite: true` is set.
