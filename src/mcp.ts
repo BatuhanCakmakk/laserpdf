@@ -167,7 +167,7 @@ const tools: Tool[] = [
   {
     name: "get_pdf_info",
     title: "PDF information",
-    description: "Page count and sizes, document information (title, author, creating program, dates), and which pages have no text (scans that need recognize_text).",
+    description: "Reads a PDF's overview and returns it as text: page count, page sizes in mm, title, author, subject, keywords, creating program, dates, whether it is encrypted, and which pages have no text layer (scans that need recognize_text). Call it first on an unknown file to decide what to do next; for the text itself use extract_text, to find a word use search_pdf. Read-only. An encrypted PDF needs its password; a missing or damaged file is reported as an error.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), password: passwordArg }, required: ["path"] },
     annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
@@ -221,8 +221,8 @@ const tools: Tool[] = [
   {
     name: "search_pdf",
     title: "Search text",
-    description: "Finds a word or phrase in a PDF (case-insensitive by default, Turkish İ/ı aware) and lists the pages and lines where it occurs.",
-    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), query: str, match_case: { type: "boolean" }, password: passwordArg }, required: ["path", "query"] },
+    description: "Finds every occurrence of a word or phrase in a PDF and returns the count and, for each match, the page number and the line it is on (up to 500). Matching is literal text (no wildcards or regular expressions), case-insensitive by default and Turkish İ/ı aware; a phrase is found within one line of text. Use it to locate something without reading the whole document; to read pages use extract_text, and to black out what was found use redact_pdf with the same words. Scanned pages have no text and give no matches until recognize_text is run. Read-only.",
+    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), query: { type: "string", description: "Word or phrase to find, as plain text." }, match_case: { type: "boolean", description: "Only match the exact upper/lower case (default false)." }, password: passwordArg }, required: ["path", "query"] },
     annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
       const doc = await open(a.path, a.password);
@@ -234,7 +234,7 @@ const tools: Tool[] = [
   {
     name: "recognize_text",
     title: "Recognize text (OCR)",
-    description: "Recognizes the text of scanned pages (Turkish and English, offline) and writes a copy whose text can be searched, selected and copied. Pages that already have text are left as they are. Scans below 150 dpi are skipped unless force is true, as their text is mostly misread.",
+    description: "Recognizes the text of scanned pages or images (Turkish and English, offline, no upload) and writes a copy of the PDF with an invisible text layer, so the text can be searched, selected and copied. Use it when get_pdf_info lists pages without text or extract_text returns them empty; then run extract_text, search_pdf or export_table on the output. Pages that already have text are left as they are. Scans below 150 dpi are skipped unless force is true, as their text is mostly misread. Takes a few seconds per page. The original is not changed, and an existing output file is only replaced with overwrite: true.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF or image."), pages: pagesArg, force: { type: "boolean", description: "Also recognize low-resolution scans." }, password: passwordArg, ...outputArgs }, required: ["path", "output"] },
     annotations: writeHints,
     async run(a) {
@@ -264,7 +264,7 @@ const tools: Tool[] = [
   {
     name: "redact_pdf",
     title: "Redact text",
-    description: "Covers every occurrence of the given words or phrases with a box and removes the text underneath from the file (not just hides it). Pages where something under a box cannot be removed (images, scans) are converted to images when flatten_unsafe is true, otherwise reported.",
+    description: "Permanently blacks out (or whites out) every occurrence of the given words or phrases in a new copy of a PDF: each is covered with a box and the text underneath is removed from the file, so it cannot be selected, searched or copied. Use it for names, numbers or other content visible on the pages; for hidden information such as the author, use remove_metadata (often both before sharing), and use search_pdf first to check what will be hit. Something under a box that cannot be cut (an image or scan) is converted to an image when flatten_unsafe is true, otherwise left hidden and reported. Returns the number of occurrences redacted; nothing is written when none is found. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
@@ -383,7 +383,7 @@ const tools: Tool[] = [
   {
     name: "export_table",
     title: "Export a table to Excel",
-    description: "Reads the table on a page and writes it as an .xlsx workbook. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts become numbers, codes and dates stay text. Scanned pages need recognize_text first.",
+    description: "Reads the table on one page of a PDF and writes it as an .xlsx workbook, and returns the rows found as a preview. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts (1.234,56 or 1,234.56) become numbers, codes and dates stay text. Use it for tables you want to calculate with; for plain text use extract_text. Scanned pages need recognize_text first; a page without text is an error. The original is not changed, and an existing output file is only replaced with overwrite: true.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
@@ -418,7 +418,7 @@ const tools: Tool[] = [
   {
     name: "split_pdf",
     title: "Split a PDF",
-    description: "Splits a PDF into files of a given number of pages each, named <base>-01.pdf, <base>-02.pdf, ... in an existing folder. For specific pages, use extract_pages.",
+    description: "Splits a PDF into new files of a given number of pages each (the last may be shorter), named <base>-01.pdf, <base>-02.pdf, ... in an existing folder, and lists them. Use it to cut a long document into equal parts; for chosen pages or a different order, use extract_pages. The original is not changed; if any of the files exists, nothing is written unless overwrite is true. Encrypted PDFs cannot be split.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
@@ -453,7 +453,7 @@ const tools: Tool[] = [
   {
     name: "add_page_numbers",
     title: "Add page numbers",
-    description: 'Writes page numbers, or a header/footer such as "Confidential - Page {n} of {total}", on every page or the selected pages.',
+    description: "Writes page numbers, or a header/footer such as \"Confidential - Page {n} of {total}\", onto every page or the chosen pages of a PDF and saves the result as a new PDF. The text is placed at the chosen corner or edge, and stays real, searchable text. For a large diagonal stamp across the page, use add_watermark. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
@@ -490,7 +490,7 @@ const tools: Tool[] = [
   {
     name: "add_watermark",
     title: "Add a watermark",
-    description: "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the selected pages.",
+    description: "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the chosen pages of a PDF and saves the result as a new PDF; the page content stays readable underneath. For small text in a corner or a footer, use add_page_numbers. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
@@ -525,7 +525,7 @@ const tools: Tool[] = [
   {
     name: "compress_pdf",
     title: "Compress a PDF",
-    description: "Makes a PDF smaller by turning every page into a JPEG image at the chosen quality. Best for scans and image-heavy files; the text is no longer selectable afterwards (run recognize_text on the result to make it searchable again).",
+    description: "Makes a PDF smaller by redrawing every page as a JPEG image at the chosen quality, and returns the size before and after. Best for scans and photo-heavy files; for documents that are mostly text it usually makes the file larger, which the result then says. The text is no longer selectable afterwards: run recognize_text on the result to make it searchable again. To get separate image files instead, use pdf_to_images. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be compressed.",
     annotations: writeHints,
     inputSchema: {
       type: "object",
