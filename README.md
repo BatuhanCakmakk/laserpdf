@@ -37,7 +37,7 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 - **Stamps:** APPROVED, DRAFT, CONFIDENTIAL, date stamp or your own text
 - **Markup:** highlight, underline and strike out text; pen and highlighter
 - **Shapes:** rectangle, ellipse, line, arrow (color, fill, width, opacity)
-- **Whiteout (redaction):** the text and links under the box are deleted from the file when you save. If something under it cannot be removed (an image, a scanned page, a form field), LaserPDF offers to turn that page into an image
+- **Redact:** draw a black or white box; the text and links under it are deleted from the file when you save. If something under it cannot be removed (an image, a scanned page, a form field), LaserPDF offers to turn that page into an image
 - **Sticky notes** saved as real PDF note annotations
 - **Form filling:** text fields, checkboxes and drop-down lists
 - Every object can be moved, resized, rotated, duplicated, copied and pasted
@@ -153,7 +153,7 @@ LaserPDF works offline. It has no account, no ads, no analytics and makes no net
 | M U K | Highlight, Underline, Strike out |
 | P I | Pen, Highlighter |
 | R O L A | Rectangle, Ellipse, Line, Arrow |
-| W N | Whiteout, Note |
+| W N | Redact, Note |
 | Delete, Ctrl+D, Ctrl+C / Ctrl+V | Delete, duplicate, copy/paste the object |
 | Arrow keys (×10 with Shift) | Nudge the selected object |
 
@@ -181,7 +181,7 @@ src-tauri/      Rust side: window, file access, file associations, MCP stdio bri
 ```
 
 ## Notes and limitations
-- "Edit text" removes the old text from the page. Where it cannot (for example text inside a form XObject), the old text is covered and stays in the file. Whiteout always deletes the text under it; images cannot be cut, so pages with an image under a whiteout box are offered to be flattened when saving. You can also right-click any page and choose **Flatten (secure redaction)**.
+- "Edit text" removes the old text from the page. Where it cannot (for example text inside a form XObject), the old text is covered and stays in the file. Redaction always deletes the text under it; images cannot be cut, so pages with an image under a redaction box are offered to be flattened when saving. You can also right-click any page and choose **Flatten (secure redaction)**.
 - Encrypted PDFs can be opened; their pages are saved as images.
 - Edited right-to-left text (Arabic, Hebrew) is not shaped yet.
 - Added text uses the embedded Arimo, Tinos, Cousine, Carlito and Caladea fonts (same letter widths as Arial, Times New Roman, Courier New and Calibri; Caladea is close to Cambria). DejaVu covers other characters and Noto Sans covers Chinese, Japanese and Korean, so text looks right in every PDF reader.

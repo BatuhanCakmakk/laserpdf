@@ -576,6 +576,10 @@ export class App {
           );
           break;
         case "shape":
+          if (sel.redact) {
+            items.push(...this.redactColorButtons(sel.fill ?? "#000000", (c) => update((x) => ((x as typeof sel).fill = c))));
+            break;
+          }
           if (sel.cover) {
             items.push(colorButton({ value: sel.fill, title: t("fillColor"), iconName: "fill", onChange: (c) => update((x) => ((x as typeof sel).fill = c)) }));
             break;
@@ -652,6 +656,7 @@ export class App {
           hint("shapeHint");
           break;
         case "whiteout":
+          items.push(...this.redactColorButtons(settings.redactColor, (c) => { settings.redactColor = c; saveSettings(); }));
           hint("whiteoutHint");
           break;
         case "table":
@@ -1430,6 +1435,20 @@ export class App {
   }
 
   /** Replaces pages with image renders of themselves (including annotations). Returns whether it succeeded. */
+  /** Black / white choice for redaction boxes. */
+  private redactColorButtons(value: string, onChange: (c: string) => void): HTMLElement[] {
+    return (["#000000", "#ffffff"] as const).map((c) => {
+      const b = h("button", { class: `tool-btn small ${value.toLowerCase() === c ? "active" : ""}`, title: t(c === "#000000" ? "redactBlack" : "redactWhite") },
+        h("span", { class: "chip", style: `background:${c}` }));
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("click", () => {
+        onChange(c);
+        this.buildPropbar();
+      });
+      return b;
+    });
+  }
+
   private async flattenPages(ids: string[], ask = true): Promise<boolean> {
     const doc = this.active;
     if (!doc || !ids.length) return false;

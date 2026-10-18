@@ -37,7 +37,7 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 - **Damgalar:** ONAYLANDI, TASLAK, GİZLİDİR, tarih damgası veya özel metin
 - **İşaretleme:** vurgulama, altını çizme, üstünü çizme; kalem ve fosforlu kalem
 - **Şekiller:** dikdörtgen, elips, çizgi, ok (renk, dolgu, kalınlık, opaklık)
-- **Beyazlatma (karartma):** Kutunun altındaki metin ve bağlantılar kaydederken dosyadan da silinir. Altında silinemeyen bir içerik varsa (görsel, taranmış sayfa, form alanı) o sayfayı görüntüye çevirmeyi önerir
+- **Karartma:** Siyah veya beyaz bir kutu çizin; altındaki metin ve bağlantılar kaydederken dosyadan da silinir. Altında silinemeyen bir içerik varsa (görsel, taranmış sayfa, form alanı) o sayfayı görüntüye çevirmeyi önerir
 - **Yapışkan notlar:** PDF'e gerçek not açıklaması olarak kaydedilir
 - **Form doldurma:** metin alanları, onay kutuları, açılır listeler
 - Her nesne taşınabilir, boyutlandırılabilir, döndürülebilir, çoğaltılabilir, kopyalanıp yapıştırılabilir
@@ -153,7 +153,7 @@ LaserPDF çevrimdışı çalışır. Hesap, reklam ve analitik yoktur, ağ iste�
 | M U K | Vurgula, Altını çiz, Üstünü çiz |
 | P I | Kalem, Fosforlu kalem |
 | R O L A | Dikdörtgen, Elips, Çizgi, Ok |
-| W N | Beyazlatma, Not |
+| W N | Karartma, Not |
 | Delete, Ctrl+D, Ctrl+C / Ctrl+V | Nesneyi sil, çoğalt, kopyala/yapıştır |
 | Ok tuşları (Shift ile ×10) | Seçili nesneyi kaydır |
 
@@ -183,7 +183,7 @@ src-tauri/      Rust tarafı: pencere, dosya erişimi, dosya ilişkilendirmeleri
 ```
 
 ## Notlar ve sınırlamalar
-- "Metni düzenle" eski metni sayfadan siler. Silemediği yerlerde (örneğin form XObject içindeki metin) eski metnin üstü örtülür ve metin dosyada kalır. Beyazlatma altındaki metni her zaman siler; görseller kesilemediği için altında görsel olan beyazlatma kutularının bulunduğu sayfaları kaydederken düzleştirmeyi önerir. Herhangi bir sayfaya sağ tıklayıp **Düzleştir (güvenli karartma)** da seçebilirsiniz.
+- "Metni düzenle" eski metni sayfadan siler. Silemediği yerlerde (örneğin form XObject içindeki metin) eski metnin üstü örtülür ve metin dosyada kalır. Karartma altındaki metni her zaman siler; görseller kesilemediği için altında görsel olan karartma kutularının bulunduğu sayfaları kaydederken düzleştirmeyi önerir. Herhangi bir sayfaya sağ tıklayıp **Düzleştir (güvenli karartma)** da seçebilirsiniz.
 - Şifreli PDF'ler açılabilir; sayfaları görüntü olarak kaydedilir.
 - Düzenlenen sağdan sola metin (Arapça, İbranice) henüz doğru şekillendirilmiyor.
 - Eklenen metin gömülü Arimo, Tinos, Cousine, Carlito ve Caladea yazı tiplerini kullanır (Arial, Times New Roman, Courier New ve Calibri ile aynı harf genişlikleri; Caladea, Cambria'ya yakındır). Diğer karakterleri DejaVu, Çince, Japonca ve Korece'yi Noto Sans karşılar; böylece metin her PDF okuyucuda doğru görünür.

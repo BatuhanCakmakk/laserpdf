@@ -33,6 +33,7 @@ export interface Settings {
   inkWidth: number;
   opacity: number;
   noteColor: string;
+  redactColor: string;
 }
 
 const defaults: Settings = {
@@ -49,6 +50,7 @@ const defaults: Settings = {
   inkWidth: 2.5,
   opacity: 1,
   noteColor: "#ffd60a",
+  redactColor: "#000000",
 };
 
 function load(): Settings {

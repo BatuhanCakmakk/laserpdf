@@ -727,7 +727,7 @@ export class Interaction {
       id: uid("o"), page: pv.ref.id, type: "shape", shape: kind,
       x, y, w, h, rot: 0, opacity: whiteout ? 1 : settings.opacity,
       stroke: whiteout ? null : settings.color,
-      fill: whiteout ? "#ffffff" : settings.fill,
+      fill: whiteout ? settings.redactColor : settings.fill,
       width: settings.strokeWidth,
     };
     if (whiteout) o.redact = true;
