@@ -33,6 +33,8 @@ const outputArgs = {
   output: path("Absolute path of the PDF to write."),
   overwrite: { type: "boolean", description: "Allow replacing an existing file (default false)." },
 };
+/** Tools that only write a new file: they never change their inputs and refuse to replace a file unless asked. */
+const writeHints = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const passwordArg = { type: "string", description: "Password, if the PDF is encrypted." };
 
 /** Opens a PDF (or an image) from disk as an editing session. */
@@ -55,7 +57,7 @@ async function open(p: unknown, password?: unknown): Promise<DocSession> {
   }
 }
 
-/** Pages selected by a spec like "1-3,5"; all pages without one. */
+/** Pages selected by a spec like "3,1-2", in the order given (each page once); all pages without one. */
 function pickPages(doc: DocSession, spec: unknown): PageRef[] {
   if (spec === undefined || spec === null || spec === "") return doc.pages;
   const n = doc.pages.length;
@@ -67,7 +69,7 @@ function pickPages(doc: DocSession, spec: unknown): PageRef[] {
     if (a < 1 || b > n || a > b) throw new ToolError(`page range ${part.trim()} is outside 1-${n}`);
     for (let i = a; i <= b; i++) out.add(i - 1);
   }
-  return [...out].sort((x, y) => x - y).map((i) => doc.pages[i]);
+  return [...out].map((i) => doc.pages[i]);
 }
 
 /** Writes `bytes` to `output`, refusing to replace a file unless asked. */
@@ -196,9 +198,9 @@ const tools: Tool[] = [
   {
     name: "extract_text",
     title: "Extract text",
-    description: "The text of a PDF, page by page.",
+    description: "Extracts the text layer of a PDF and returns it as plain text, one \"--- Page N ---\" section per page, in reading order. Use it to read, summarize or quote a document; to find where a word occurs, search_pdf is faster, and for tables export_table keeps rows and columns. Scanned pages have no text layer and come back marked as empty: run recognize_text on the file first, then extract from its output. Encrypted PDFs need their password. Very long documents stop after about 400,000 characters with a note; ask for fewer pages. Read-only; the file is not changed.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), pages: pagesArg, password: passwordArg }, required: ["path"] },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
       const doc = await open(a.path, a.password);
       const parts: string[] = [];
@@ -234,6 +236,7 @@ const tools: Tool[] = [
     title: "Recognize text (OCR)",
     description: "Recognizes the text of scanned pages (Turkish and English, offline) and writes a copy whose text can be searched, selected and copied. Pages that already have text are left as they are. Scans below 150 dpi are skipped unless force is true, as their text is mostly misread.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF or image."), pages: pagesArg, force: { type: "boolean", description: "Also recognize low-resolution scans." }, password: passwordArg, ...outputArgs }, required: ["path", "output"] },
+    annotations: writeHints,
     async run(a) {
       const doc = await open(a.path, a.password);
       const { hasText, recognizePages, scanDpi, MIN_SCAN_DPI } = await import("./ocr");
@@ -263,6 +266,7 @@ const tools: Tool[] = [
     title: "Redact text",
     description: "Covers every occurrence of the given words or phrases with a box and removes the text underneath from the file (not just hides it). Pages where something under a box cannot be removed (images, scans) are converted to images when flatten_unsafe is true, otherwise reported.",
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -318,8 +322,9 @@ const tools: Tool[] = [
   {
     name: "remove_metadata",
     title: "Remove hidden information",
-    description: "Writes a copy without hidden information: author, title, creating program, dates, XMP metadata, comment authors, leftovers of earlier edits and photo location/camera data.",
+    description: "Writes a copy of a PDF with its hidden information removed: author, title, subject, keywords, creating program, dates, XMP metadata, comment authors, leftovers of earlier edits and photo location/camera data. Use it before sharing a file; the visible pages stay exactly the same. To remove visible text, use redact_pdf; to only read the information, use get_pdf_info. The original is never changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved this way.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), password: passwordArg, ...outputArgs }, required: ["path", "output"] },
+    annotations: writeHints,
     async run(a) {
       const doc = await open(a.path, a.password);
       doc.meta = { title: "", author: "", subject: "", keywords: "", clean: true };
@@ -330,8 +335,9 @@ const tools: Tool[] = [
   {
     name: "merge_pdfs",
     title: "Merge PDFs",
-    description: "Joins PDFs and images (JPEG, PNG, ...) in the given order into one PDF.",
+    description: "Joins several PDFs and images (JPEG, PNG, WebP, ...) into one new PDF, in the order given; every image becomes a page of its own size. Use split_pdf or extract_pages for the opposite. The inputs are not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be merged.",
     inputSchema: { type: "object", properties: { paths: { type: "array", items: str, description: "Absolute paths, in order." }, ...outputArgs }, required: ["paths", "output"] },
+    annotations: writeHints,
     async run(a) {
       const paths = Array.isArray(a.paths) ? a.paths.map(String) : [];
       if (paths.length < 1) throw new ToolError("paths must list at least one file");
@@ -348,8 +354,9 @@ const tools: Tool[] = [
   {
     name: "extract_pages",
     title: "Extract pages",
-    description: "Writes the selected pages to a new PDF, in the given order.",
+    description: "Writes the chosen pages of a PDF to a new PDF, in the order given (\"3,1\" puts page 3 first). Use it to pull out or reorder pages; to cut a whole document into equal parts, use split_pdf. The original is not changed, and an existing output file is only replaced with overwrite: true.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), pages: { ...pagesArg, description: 'Pages to keep, e.g. "1-3,5".' }, password: passwordArg, ...outputArgs }, required: ["path", "pages", "output"] },
+    annotations: writeHints,
     async run(a) {
       const doc = await open(a.path, a.password);
       const refs = pickPages(doc, a.pages);
@@ -360,8 +367,9 @@ const tools: Tool[] = [
   {
     name: "rotate_pages",
     title: "Rotate pages",
-    description: "Rotates pages clockwise by 90, 180 or 270 degrees and writes the result.",
+    description: "Rotates every page, or the chosen pages, clockwise by 90, 180 or 270 degrees and writes the whole document to a new PDF. Use it for sideways or upside-down scans; page content is not altered, only its display rotation. The original is not changed, and an existing output file is only replaced with overwrite: true.",
     inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), degrees: { type: "number", enum: [90, 180, 270] }, pages: pagesArg, password: passwordArg, ...outputArgs }, required: ["path", "degrees", "output"] },
+    annotations: writeHints,
     async run(a) {
       const deg = Number(a.degrees);
       if (![90, 180, 270].includes(deg)) throw new ToolError("degrees must be 90, 180 or 270");
@@ -377,6 +385,7 @@ const tools: Tool[] = [
     title: "Export a table to Excel",
     description: "Reads the table on a page and writes it as an .xlsx workbook. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts become numbers, codes and dates stay text. Scanned pages need recognize_text first.",
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -411,6 +420,7 @@ const tools: Tool[] = [
     title: "Split a PDF",
     description: "Splits a PDF into files of a given number of pages each, named <base>-01.pdf, <base>-02.pdf, ... in an existing folder. For specific pages, use extract_pages.",
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -445,6 +455,7 @@ const tools: Tool[] = [
     title: "Add page numbers",
     description: 'Writes page numbers, or a header/footer such as "Confidential - Page {n} of {total}", on every page or the selected pages.',
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -481,6 +492,7 @@ const tools: Tool[] = [
     title: "Add a watermark",
     description: "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the selected pages.",
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),
@@ -515,6 +527,7 @@ const tools: Tool[] = [
     title: "Compress a PDF",
     description: "Makes a PDF smaller by turning every page into a JPEG image at the chosen quality. Best for scans and image-heavy files; the text is no longer selectable afterwards (run recognize_text on the result to make it searchable again).",
     inputSchema: {
+    annotations: writeHints,
       type: "object",
       properties: {
         path: path("Absolute path of the PDF."),

@@ -93,7 +93,8 @@ try {
   const merged = await call("merge_pdfs", { paths: [input, join(work, "redacted.pdf")], output: join(work, "merged.pdf") });
   check(/6 page/.test(merged.text), "merge_pdfs joins two files");
   const pages = await call("extract_pages", { path: input, pages: "3,1", output: join(work, "pages.pdf") });
-  check(/2 page/.test(pages.text), "extract_pages writes the chosen pages");
+  const pagesText = await call("extract_text", { path: join(work, "pages.pdf") });
+  check(/2 page/.test(pages.text) && /Page 3 report[\s\S]*Page 1 report/.test(pagesText.text), "extract_pages writes the chosen pages in the given order");
   const rot = await call("rotate_pages", { path: input, degrees: 90, pages: "1", output: join(work, "rotated.pdf") });
   const rotated = await PDFDocument.load(new Uint8Array(await import("node:fs").then((fs) => fs.readFileSync(join(work, "rotated.pdf")))));
   check(!rot.isError && rotated.getPage(0).getRotation().angle === 90 && rotated.getPage(1).getRotation().angle === 0, "rotate_pages rotates only the chosen page");
