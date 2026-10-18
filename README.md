@@ -88,11 +88,13 @@ Browser-only development server:
 npm run dev            # http://localhost:1420
 ```
 
-Every push to `main` builds the Windows installers and the Store package (**Actions → Build desktop apps → Artifacts**). Pushing a `v*` tag, or running the workflow with a `version`, builds all platforms and publishes a release. Update the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` first.
+Every push to `main` builds the Windows installers and the Store package (**Actions → Build desktop apps → Artifacts**); changes to documentation only (`*.md`, `docs/`) are not built. Pushing a `v*` tag, or running the workflow with a `version`, builds all platforms and publishes a release. Update the version first in `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src/app.ts` and the `Dockerfile`.
 
 ## Use with AI assistants (MCP)
 
 Started with `--mcp`, LaserPDF runs as a [Model Context Protocol](https://modelcontextprotocol.io) server without opening a window. AI assistants that support MCP, such as Claude Desktop, can then work with PDFs on your PC. LaserPDF does the processing locally; nothing else (Node.js, Python) needs to be installed.
+
+<a href="https://glama.ai/mcp/servers/BatuhanCakmakk/laserpdf"><img src="https://glama.ai/mcp/servers/BatuhanCakmakk/laserpdf/badges/score.svg" alt="LaserPDF MCP server on Glama"></a>
 
 | Tool | What it does |
 |---|---|

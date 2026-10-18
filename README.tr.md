@@ -6,7 +6,7 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 
 <a href="https://apps.microsoft.com/detail/9NWK3HL0L4KB"><img src="https://get.microsoft.com/images/tr%20dark.svg" alt="Microsoft Store'dan edinin" height="52"></a>
 
-![LaserPDF](docs/banner.png)
+![LaserPDF](docs/tr/banner.png)
 
 - **Küçük:** [Tauri](https://tauri.app) ile yapıldı. Electron uygulamaları gibi tarayıcıyı içinde taşımaz, Windows'un kendi web motorunu (WebView2) kullanır. Store paketi yaklaşık 38 MB; bunun çoğu Çince, Japonca ve Korece yazı tipleri ile metin tanıma modelleri.
 - **Render:** [pdf.js](https://mozilla.github.io/pdf.js/) (Firefox'un PDF motoru). **Düzenleme ve kaydetme:** [pdf-lib](https://pdf-lib.js.org/).
@@ -15,9 +15,9 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 
 | Mevcut metni düzenleme | İmza ve notlar |
 |---|---|
-| ![Metni düzenleme](docs/edit-text.png) | ![İmza ve notlar](docs/sign-and-annotate.png) |
+| ![Metni düzenleme](docs/tr/edit-text.png) | ![İmza ve notlar](docs/tr/sign-and-annotate.png) |
 | **Metin tanıma (OCR)** | **Sayfaları düzenleme (koyu tema)** |
-| ![OCR](docs/ocr.png) | ![Sayfa düzenleyici](docs/organize-pages-dark.png) |
+| ![OCR](docs/tr/ocr.png) | ![Sayfa düzenleyici](docs/tr/organize-pages-dark.png) |
 
 ## Özellikler
 
@@ -88,11 +88,13 @@ Yalnızca tarayıcıda geliştirme:
 npm run dev            # http://localhost:1420
 ```
 
-`main` dalına her push Windows kurulum dosyalarını ve Store paketini üretir (**Actions → Build desktop apps → Artifacts**). `v*` etiketi push'lamak ya da iş akışını `version` ile çalıştırmak tüm platformları derler ve sürümü yayınlar. Önce `package.json`, `src-tauri/tauri.conf.json` ve `src-tauri/Cargo.toml` içindeki sürüm numarasını güncelleyin.
+`main` dalına her push Windows kurulum dosyalarını ve Store paketini üretir (**Actions → Build desktop apps → Artifacts**); yalnızca belgelerdeki (`*.md`, `docs/`) değişiklikler derlenmez. `v*` etiketi push'lamak ya da iş akışını `version` ile çalıştırmak tüm platformları derler ve sürümü yayınlar. Önce `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src/app.ts` ve `Dockerfile` içindeki sürüm numarasını güncelleyin.
 
 ## Yapay zekâ asistanlarıyla kullanım (MCP)
 
 LaserPDF, `--mcp` ile başlatıldığında pencere açmadan bir [Model Context Protocol](https://modelcontextprotocol.io) sunucusu olarak çalışır. Claude Desktop gibi MCP destekleyen asistanlar PDF'leri bilgisayarınızda işleyebilir; işlemleri LaserPDF yerel olarak yapar. Ayrı bir program (Node.js, Python) gerekmez.
+
+<a href="https://glama.ai/mcp/servers/BatuhanCakmakk/laserpdf"><img src="https://glama.ai/mcp/servers/BatuhanCakmakk/laserpdf/badges/score.svg" alt="Glama'da LaserPDF MCP sunucusu"></a>
 
 | Araç | Ne yapar |
 |---|---|
@@ -156,6 +158,35 @@ LaserPDF çevrimdışı çalışır. Hesap, reklam ve analitik yoktur, ağ iste�
 | Ok tuşları (Shift ile ×10) | Seçili nesneyi kaydır |
 
 Proje yapısı, sınırlamalar ve lisanslar için [İngilizce README](README.md#project-structure)'ye bakın.
+
+## Proje yapısı
+
+```
+src/
+  app.ts        Arayüz: araç çubuğu, sekmeler, menüler, kısayollar
+  viewer.ts     Sayfa yerleşimi, ihtiyaç anında render, yakınlaştırma, form ve bağlantı katmanları
+  interact.ts   Nesneleri seçme, taşıma, boyutlandırma ve döndürme; çizim araçları
+  objects.ts    Açıklama nesnelerinin ekranda çizilmesi
+  export.ts     pdf-lib ile kaydetme (nesneleri PDF içeriğine yazar)
+  erase.ts      Düzenlenen ve karartılan metni sayfa içeriğinden siler
+  meta.ts       Gizli bilgileri silme, JPEG meta verisini temizleme
+  stream-iterator.ts  WebKit web görünümleri (Linux, macOS) için akış yinelemesi
+  ocr.ts        Metin tanıma (Tesseract) ve görünmez metin katmanı
+  table.ts      Tablo bulma ve .xlsx yazma
+  mcp.ts        MCP araçları (--mcp modunda gizli bir pencerede çalışır)
+  doc.ts        Belge modeli, geri al / yinele geçmişi
+  sidebar.ts    Küçük resimler, sayfa düzenleyici, yer imleri
+  search.ts     Arama
+  dialogs.ts    İmza, sayfa numarası, filigran, özellikler ve diğer pencereler
+  platform.ts   Masaüstü (Tauri) ve tarayıcı dosya erişimi
+src-tauri/      Rust tarafı: pencere, dosya erişimi, dosya ilişkilendirmeleri, MCP stdio köprüsü
+```
+
+## Notlar ve sınırlamalar
+- "Metni düzenle" eski metni sayfadan siler. Silemediği yerlerde (örneğin form XObject içindeki metin) eski metnin üstü örtülür ve metin dosyada kalır. Beyazlatma altındaki metni her zaman siler; görseller kesilemediği için altında görsel olan beyazlatma kutularının bulunduğu sayfaları kaydederken düzleştirmeyi önerir. Herhangi bir sayfaya sağ tıklayıp **Düzleştir (güvenli karartma)** da seçebilirsiniz.
+- Şifreli PDF'ler açılabilir; sayfaları görüntü olarak kaydedilir.
+- Düzenlenen sağdan sola metin (Arapça, İbranice) henüz doğru şekillendirilmiyor.
+- Eklenen metin gömülü Arimo, Tinos, Cousine, Carlito ve Caladea yazı tiplerini kullanır (Arial, Times New Roman, Courier New ve Calibri ile aynı harf genişlikleri; Caladea, Cambria'ya yakındır). Diğer karakterleri DejaVu, Çince, Japonca ve Korece'yi Noto Sans karşılar; böylece metin her PDF okuyucuda doğru görünür.
 
 ## Lisans
 LaserPDF, [GNU GPL v3.0](LICENSE) ya da (tercihinize göre) daha sonraki bir sürümüyle lisanslanmıştır.
