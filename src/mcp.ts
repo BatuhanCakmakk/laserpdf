@@ -108,13 +108,30 @@ async function pageText(doc: DocSession, ref: PageRef): Promise<string> {
 }
 
 /** Places of `query` on the given pages, in page coordinates. */
+type Hit = { ref: PageRef; page: number; rect: { x: number; y: number; w: number; h: number }; context: string };
+
+/**
+ * Occurrences of `query`. Upright text comes with its position; rotated text (diagonal watermarks,
+ * vertical margin notes) is not in getTextItems, so it is counted separately, without a position.
+ */
 async function find(doc: DocSession, refs: PageRef[], query: string, matchCase: boolean) {
   const q = fold(query, matchCase);
-  const hits: { ref: PageRef; page: number; rect: { x: number; y: number; w: number; h: number }; context: string }[] = [];
+  const hits: Hit[] = [];
+  const rotated: Omit<Hit, "rect">[] = [];
   for (const ref of refs) {
     const src = ref.src ? doc.sources.get(ref.src) : undefined;
     if (!src || !q) continue;
-    for (const it of await getTextItems(await src.pdf.getPage(ref.index + 1))) {
+    const pdfPage = await src.pdf.getPage(ref.index + 1);
+    for (const it of (await pdfPage.getTextContent()).items) {
+      if (!("str" in it)) continue;
+      const [a, b, c, d] = it.transform as number[];
+      if (Math.abs(b) <= 1e-3 && Math.abs(c) <= 1e-3 && a > 0 && d > 0) continue;
+      const s = fold(it.str, matchCase);
+      for (let pos = s.indexOf(q); pos >= 0; pos = s.indexOf(q, pos + Math.max(1, q.length))) {
+        rotated.push({ ref, page: doc.pages.indexOf(ref) + 1, context: it.str.trim() });
+      }
+    }
+    for (const it of await getTextItems(pdfPage)) {
       const s = fold(it.str, matchCase);
       for (let pos = s.indexOf(q); pos >= 0; pos = s.indexOf(q, pos + Math.max(1, q.length))) {
         const off = charOffsets(it);
@@ -128,7 +145,7 @@ async function find(doc: DocSession, refs: PageRef[], query: string, matchCase: 
       }
     }
   }
-  return hits;
+  return { hits, rotated };
 }
 
 const pdfDate = (v: unknown) => {
@@ -226,9 +243,10 @@ const tools: Tool[] = [
     annotations: { readOnlyHint: true, openWorldHint: false },
     async run(a) {
       const doc = await open(a.path, a.password);
-      const hits = await find(doc, doc.pages, String(a.query ?? ""), a.match_case === true);
-      if (!hits.length) return `"${a.query}" was not found.`;
-      return [`${hits.length} match(es) for "${a.query}":`, ...hits.slice(0, 500).map((h) => `p. ${h.page}: ${h.context}`)].join("\n");
+      const { hits, rotated } = await find(doc, doc.pages, String(a.query ?? ""), a.match_case === true);
+      const all = [...hits.map((h) => ({ ...h, note: "" })), ...rotated.map((h) => ({ ...h, note: " (rotated text)" }))].sort((x, y) => x.page - y.page);
+      if (!all.length) return `"${a.query}" was not found.`;
+      return [`${all.length} match(es) for "${a.query}":`, ...all.slice(0, 500).map((h) => `p. ${h.page}: ${h.context}${h.note}`)].join("\n");
     },
   },
   {
@@ -271,7 +289,7 @@ const tools: Tool[] = [
       properties: {
         path: path("Absolute path of the PDF."),
         terms: { type: "array", items: str, description: "Words or phrases to redact." },
-        match_case: { type: "boolean" },
+        match_case: { type: "boolean", description: "Only match the exact upper/lower case (default false)." },
         color: { type: "string", enum: ["black", "white"], description: "Box colour (default black)." },
         flatten_unsafe: { type: "boolean", description: "Convert pages with content that cannot be cut to images (default false)." },
         password: passwordArg,
@@ -285,8 +303,11 @@ const tools: Tool[] = [
       const doc = await open(a.path, a.password);
       const fill = a.color === "white" ? "#ffffff" : "#000000";
       let count = 0;
+      const skipped = new Set<number>();
       for (const term of terms) {
-        for (const h of await find(doc, doc.pages, term, a.match_case === true)) {
+        const { hits, rotated } = await find(doc, doc.pages, term, a.match_case === true);
+        for (const h of rotated) skipped.add(h.page);
+        for (const h of hits) {
           const box: ShapeObj = {
             id: uid("o"), page: h.ref.id, type: "shape", shape: "rect", rot: 0, opacity: 1, stroke: null, fill, width: 1, redact: true,
             x: h.rect.x - 1, y: h.rect.y - 1, w: h.rect.w + 2, h: h.rect.h + 2,
@@ -295,7 +316,14 @@ const tools: Tool[] = [
           count++;
         }
       }
-      if (!count) return `None of the terms were found; nothing was written.`;
+      // Rotated text has no box to cover; say so rather than report a clean result.
+      const rotatedNote = skipped.size
+        ? `Warning: on pages ${[...skipped].sort((x, y) => x - y).join(", ")} a term also appears in rotated text (e.g. a diagonal watermark), which cannot be redacted; it is still in the file.`
+        : "";
+      if (!count) {
+        if (rotatedNote) throw new ToolError(`${rotatedNote} Nothing was written.`);
+        return `None of the terms were found; nothing was written.`;
+      }
       const unsafePages: string[] = [];
       let bytes = await exportDoc(doc, { unsafePages });
       const unsafeNums = unsafePages.map((id) => doc.pages.findIndex((p) => p.id === id) + 1);
@@ -316,7 +344,7 @@ const tools: Tool[] = [
         note = `Warning: on pages ${unsafeNums.join(", ")} something under a box (an image or scan) cannot be removed from the file; it is hidden but still there. Run again with flatten_unsafe: true to convert those pages to images.`;
       }
       const out = await save(a, bytes);
-      return [`Redacted ${count} occurrence(s) of ${terms.length} term(s); saved to ${out}.`, note].filter(Boolean).join("\n");
+      return [`Redacted ${count} occurrence(s) of ${terms.length} term(s); saved to ${out}.`, note, rotatedNote].filter(Boolean).join("\n");
     },
   },
   {

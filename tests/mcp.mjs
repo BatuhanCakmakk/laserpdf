@@ -31,7 +31,7 @@ for (let i = 1; i <= 3; i++) {
 }
 const input = join(work, "input.pdf");
 writeFileSync(input, await doc.save());
-for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf", "img-01.png", "img-03.png", "img-03.jpg"]) if (existsSync(join(work, n))) rmSync(join(work, n));
+for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf", "img-01.png", "img-03.png", "img-03.jpg", "x2.pdf"]) if (existsSync(join(work, n))) rmSync(join(work, n));
 
 const child = spawn(exe, ["--mcp"], { stdio: ["pipe", "pipe", "inherit"] });
 const pending = new Map();
@@ -108,6 +108,10 @@ try {
   const marked = await call("add_watermark", { path: input, text: "DRAFT", pages: "1", output: join(work, "watermarked.pdf") });
   const markedText = await call("extract_text", { path: join(work, "watermarked.pdf") });
   check(!marked.isError && (markedText.text.match(/DRAFT/g) ?? []).length === 1, "add_watermark marks only the chosen page");
+  const markFound = await call("search_pdf", { path: join(work, "watermarked.pdf"), query: "draft" });
+  check(/1 match/.test(markFound.text) && /rotated text/.test(markFound.text), "search_pdf also finds rotated text (the diagonal watermark)");
+  const markRedact = await call("redact_pdf", { path: join(work, "watermarked.pdf"), terms: ["DRAFT"], output: join(work, "x2.pdf") });
+  check(markRedact.isError && /rotated text/.test(markRedact.text) && !existsSync(join(work, "x2.pdf")), "redact_pdf reports rotated text it cannot remove instead of 'not found'");
   const comp = await call("compress_pdf", { path: input, quality: "low", output: join(work, "compressed.pdf") });
   const compInfo = await call("get_pdf_info", { path: join(work, "compressed.pdf") });
   check(!comp.isError && /Pages: 3/.test(compInfo.text) && /Pages without text/.test(compInfo.text), "compress_pdf writes the pages as images");
