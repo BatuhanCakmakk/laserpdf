@@ -28,14 +28,14 @@ class ToolError extends Error {}
 
 const str = { type: "string" } as const;
 const path = (description: string) => ({ type: "string", description });
-const pagesArg = { type: "string", description: 'Pages, e.g. "1-3,5" (1-based). All pages when omitted.' };
+const pagesArg = { type: "string", description: 'Pages as 1-based numbers and ranges, e.g. "1-3,5". All pages when omitted; a page outside the document is an error.' };
 const outputArgs = {
-  output: path("Absolute path of the PDF to write."),
+  output: path("Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."),
   overwrite: { type: "boolean", description: "Allow replacing an existing file (default false)." },
 };
 /** Tools that only write a new file: they never change their inputs and refuse to replace a file unless asked. */
 const writeHints = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const passwordArg = { type: "string", description: "Password, if the PDF is encrypted." };
+const passwordArg = { type: "string", description: "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it." };
 
 /** Opens a PDF (or an image) from disk as an editing session. */
 async function open(p: unknown, password?: unknown): Promise<DocSession> {
@@ -354,8 +354,8 @@ const tools: Tool[] = [
   {
     name: "extract_pages",
     title: "Extract pages",
-    description: "Writes the chosen pages of a PDF to a new PDF, in the order given (\"3,1\" puts page 3 first). Use it to pull out or reorder pages; to cut a whole document into equal parts, use split_pdf. The original is not changed, and an existing output file is only replaced with overwrite: true.",
-    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), pages: { ...pagesArg, description: 'Pages to keep, e.g. "1-3,5".' }, password: passwordArg, ...outputArgs }, required: ["path", "pages", "output"] },
+    description: "Writes the chosen pages of a PDF to a new PDF, in the order given (\"3,1\" puts page 3 first). Use it to pull out or reorder pages; to cut a whole document into equal parts, use split_pdf. The original is not changed, and an existing output file is only replaced with overwrite: true. Fails with a message for an invalid or out-of-range page and for encrypted PDFs.",
+    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), pages: { ...pagesArg, description: 'Pages to keep, in the order wanted, e.g. "3,1-2" (each page is written once; repeats are ignored).' }, password: passwordArg, ...outputArgs }, required: ["path", "pages", "output"] },
     annotations: writeHints,
     async run(a) {
       const doc = await open(a.path, a.password);
@@ -367,8 +367,8 @@ const tools: Tool[] = [
   {
     name: "rotate_pages",
     title: "Rotate pages",
-    description: "Rotates every page, or the chosen pages, clockwise by 90, 180 or 270 degrees and writes the whole document to a new PDF. Use it for sideways or upside-down scans; page content is not altered, only its display rotation. The original is not changed, and an existing output file is only replaced with overwrite: true.",
-    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), degrees: { type: "number", enum: [90, 180, 270] }, pages: pagesArg, password: passwordArg, ...outputArgs }, required: ["path", "degrees", "output"] },
+    description: "Rotates every page, or the chosen pages, clockwise by 90, 180 or 270 degrees and writes the whole document to a new PDF. Use it for sideways or upside-down scans; page content is not altered, only its display rotation, which is added to any rotation the page already has. The original is not changed, and an existing output file is only replaced with overwrite: true. Fails with a message for an invalid page range and for encrypted PDFs.",
+    inputSchema: { type: "object", properties: { path: path("Absolute path of the PDF."), degrees: { type: "number", enum: [90, 180, 270], description: "Clockwise turn added to the current rotation." }, pages: pagesArg, password: passwordArg, ...outputArgs }, required: ["path", "degrees", "output"] },
     annotations: writeHints,
     async run(a) {
       const deg = Number(a.degrees);
