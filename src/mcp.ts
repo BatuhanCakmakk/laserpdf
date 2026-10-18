@@ -318,7 +318,7 @@ const tools: Tool[] = [
       }
       // Rotated text has no box to cover; say so rather than report a clean result.
       const rotatedNote = skipped.size
-        ? `Warning: on pages ${[...skipped].sort((x, y) => x - y).join(", ")} a term also appears in rotated text (e.g. a diagonal watermark), which cannot be redacted; it is still in the file.`
+        ? `Warning: on page${skipped.size > 1 ? "s" : ""} ${[...skipped].sort((x, y) => x - y).join(", ")} a term also appears in rotated text (e.g. a diagonal watermark), which cannot be redacted; it is still in the file.`
         : "";
       if (!count) {
         if (rotatedNote) throw new ToolError(`${rotatedNote} Nothing was written.`);
