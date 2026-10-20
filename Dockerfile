@@ -3,7 +3,7 @@
 # started first. Its output goes to /dev/null: stdout belongs to the MCP protocol.
 FROM ubuntu:22.04
 
-ARG VERSION=1.0.9
+ARG VERSION=1.1.0
 ARG DEB_URL=https://github.com/BatuhanCakmakk/laserpdf/releases/download/v${VERSION}/LaserPDF_${VERSION}_amd64.deb
 ENV DEBIAN_FRONTEND=noninteractive
 
