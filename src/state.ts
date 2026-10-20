@@ -17,7 +17,11 @@ export type Tool =
   | "whiteout"
   | "note"
   /** Select a table area to export to Excel. */
-  | "table";
+  | "table"
+  /** Select the area of the page to keep. */
+  | "crop"
+  /** Draw the area of a link. */
+  | "link";
 
 export interface Settings {
   color: string;

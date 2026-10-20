@@ -34,26 +34,31 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 - **Metin ekleme:** yazı tipi, boyut, kalın/italik, hizalama, renk, arka plan ve çerçeve
 - **Görsel ekleme:** PNG, JPG, WebP, GIF, BMP; panodan yapıştırma (Ctrl+V)
 - **İmza:** çizin, adınızı yazın ya da görsel yükleyin; imzalar sonraki kullanım için kaydedilir
-- **Damgalar:** ONAYLANDI, TASLAK, GİZLİDİR, tarih damgası veya özel metin
+- **Damgalar:** ONAYLANDI, TASLAK, GİZLİDİR, tarih ya da tarih ve saat, özel metin veya adınızla birlikte tarih ve saat içeren damga
 - **İşaretleme:** vurgulama, altını çizme, üstünü çizme; kalem ve fosforlu kalem
 - **Şekiller:** dikdörtgen, elips, çizgi, ok (renk, dolgu, kalınlık, opaklık)
 - **Karartma:** Siyah veya beyaz bir kutu çizin; altındaki metin ve bağlantılar kaydederken dosyadan da silinir. Altında silinemeyen bir içerik varsa (görsel, taranmış sayfa, form alanı) o sayfayı görüntüye çevirmeyi önerir
+- **Bağlantılar:** Bir web adresini açan ya da belgedeki bir sayfaya giden alan çizin
 - **Yapışkan notlar:** PDF'e gerçek not açıklaması olarak kaydedilir
 - **Form doldurma:** metin alanları, onay kutuları, açılır listeler
 - Her nesne taşınabilir, boyutlandırılabilir, döndürülebilir, çoğaltılabilir, kopyalanıp yapıştırılabilir
 - Tüm açıklamaları sayfa sayfa listeleyen **Açıklamalar** paneli
-- Geri al / yinele (150 adım)
+- Geri al / yinele (150 adım); tüm değişiklikler geri alınınca kaydedilecek bir şey kalmaz
+- **Kurtarma:** Kaydedilmemiş çalışma 30 saniyede bir saklanır; LaserPDF beklenmedik şekilde kapanırsa bir sonraki açılışta geri getirilebilir
 
 ### Sayfa işlemleri
 - Sürükle-bırak ile yeniden sıralama (kenar çubuğu veya tam ekran **Sayfaları düzenle** görünümü)
 - Döndürme, silme, çoğaltma, boş sayfa ekleme
 - Başka PDF'lerden veya görsellerden sayfa ekleme; dosyaları kenar çubuğuna sürükleyip bırakma
 - Seçili sayfaları ayrı PDF olarak ayıklama, belgeyi N sayfalık dosyalara bölme
+- **Kırpma:** Sayfaları seçilen alana kırpma (bu sayfa, tüm sayfalar ya da seçili sayfalar); dışarıda kalan içerik silinmez, gizlenir
+- **Yer imleri:** ekleme, yeniden adlandırma, sıralama, iç içe yerleştirme ve silme
 - Sayfayı düzleştirme (görüntüye çevirerek **kalıcı karartma**)
 
 ### Araçlar
 - PDF birleştirme, görsellerden PDF oluşturma, yeni boş belge
 - Sayfa numarası, üst/alt bilgi (örn. `GİZLİ · Sayfa {n} / {total}`) ve filigran
+- **Kitapçık:** Kâğıdın her yüzüne katlama sırasına göre iki sayfa; çift taraflı yazdırmak için
 - Belge özellikleri (başlık, yazar, konu, anahtar kelimeler)
 - Kaydederken **gizli bilgileri silme:** oluşturan program, tarihler, XMP verileri, yorum yazarları ve fotoğraflardaki konum/kamera bilgisi. Eklenen fotoğrafların konum bilgisi her zaman silinir
 - **Metin tanıma (OCR):** Taranmış sayfaların metnini tanır ve sayfaya görünmez bir metin katmanı ekler; metin aranabilir, seçilebilir ve kopyalanabilir olur. Türkçe ve İngilizce, tamamen çevrimdışı (Tesseract). Taranmış bir belge açıldığında önerilir; 150 dpi altındaki taramalarda dakikalarca uğraşmak yerine nedenini söyler
@@ -179,6 +184,7 @@ src/
   search.ts     Arama
   dialogs.ts    İmza, sayfa numarası, filigran, özellikler ve diğer pencereler
   platform.ts   Masaüstü (Tauri) ve tarayıcı dosya erişimi
+  recovery.ts   Kaydedilmemiş çalışmanın otomatik saklanması ve çökmeden sonra kurtarma
 src-tauri/      Rust tarafı: pencere, dosya erişimi, dosya ilişkilendirmeleri, MCP stdio köprüsü
 ```
 

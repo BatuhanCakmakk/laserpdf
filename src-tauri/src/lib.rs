@@ -36,6 +36,46 @@ fn write_file(request: Request) -> Result<(), String> {
     })
 }
 
+/// Folder for autosaved copies of unsaved documents, created on first use.
+fn recovery_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recovery");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+#[tauri::command]
+fn recovery_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(recovery_path(&app)?.to_string_lossy().into_owned())
+}
+
+/// Names of the files in the recovery folder.
+#[tauri::command]
+fn recovery_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = recovery_path(&app)?;
+    Ok(std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect())
+}
+
+/// Deletes a file of the recovery folder (and nothing outside it).
+#[tauri::command]
+fn recovery_remove(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
+        return Err("invalid name".into());
+    }
+    match std::fs::remove_file(recovery_path(&app)?.join(&name)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{name}: {e}")),
+        _ => Ok(()),
+    }
+}
+
 /// Files passed on the command line or by the OS ("Open with LaserPDF").
 #[tauri::command]
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
@@ -103,7 +143,7 @@ pub fn run() {
         .manage(Pending(Mutex::new(Vec::new())))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![read_file, write_file, startup_files, print_page])
+        .invoke_handler(tauri::generate_handler![read_file, write_file, startup_files, print_page, recovery_dir, recovery_list, recovery_remove])
         .build(tauri::generate_context!())
         .expect("error while building LaserPDF")
         .run(|_app, _event| {

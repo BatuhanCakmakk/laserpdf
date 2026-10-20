@@ -1,7 +1,8 @@
 import type { DocSession } from "./doc";
-import type { PageRef } from "./model";
-import { displaySize, pageRotation } from "./model";
-import { h } from "./ui";
+import type { OutlineItem, PageRef } from "./model";
+import { displaySize, pageRotation, uid } from "./model";
+import { h, promptDialog, showMenu } from "./ui";
+import { icon } from "./icons";
 import { t } from "./i18n";
 import { movePages } from "./pages";
 import { renderObj } from "./objects";
@@ -332,50 +333,175 @@ export class PageGrid {
   }
 }
 
-/** Bookmarks (document outline) of the first source. */
-export async function renderOutline(doc: DocSession, container: HTMLElement, goTo: (index: number) => void): Promise<void> {
-  container.replaceChildren();
-  const first = doc.sources.values().next().value;
-  if (!first) return;
-  const outline = await first.pdf.getOutline().catch(() => null);
-  if (!outline?.length) {
-    container.append(h("div", { class: "empty-note" }, t("noOutline")));
-    return;
+/** Bookmarks of the first source, as an editable list (loaded once per document). */
+const sourceOutlines = new WeakMap<DocSession, Promise<OutlineItem[]>>();
+
+function loadOutline(doc: DocSession): Promise<OutlineItem[]> {
+  let p = sourceOutlines.get(doc);
+  if (!p) {
+    p = readOutline(doc);
+    sourceOutlines.set(doc, p);
   }
-  const resolve = async (dest: unknown): Promise<number | null> => {
+  return p;
+}
+
+async function readOutline(doc: DocSession): Promise<OutlineItem[]> {
+  const first = doc.sources.values().next().value;
+  if (!first) return [];
+  const outline = await first.pdf.getOutline().catch(() => null);
+  if (!outline?.length) return [];
+  const resolve = async (dest: unknown): Promise<{ page: string | null; top: number | null }> => {
     try {
       const d = typeof dest === "string" ? await first.pdf.getDestination(dest) : (dest as unknown[]);
-      if (!d) return null;
+      if (!d) return { page: null, top: null };
       const ref = d[0];
       const pageIndex = typeof ref === "number" ? ref : await first.pdf.getPageIndex(ref as never);
-      const idx = doc.pages.findIndex((p) => p.src === first.id && p.index === pageIndex);
-      return idx >= 0 ? idx : null;
+      const page = doc.pages.find((p) => p.src === first.id && p.index === pageIndex)?.id ?? null;
+      // [page, /XYZ left top zoom] or [page, /FitH top]
+      const kind = (d[1] as { name?: string } | undefined)?.name;
+      const top = kind === "XYZ" ? d[3] : kind === "FitH" || kind === "FitBH" ? d[2] : null;
+      return { page, top: typeof top === "number" ? top : null };
     } catch {
-      return null;
+      return { page: null, top: null };
     }
   };
   type Node = { title: string; dest: unknown; items: Node[]; url?: string | null };
-  const build = (nodes: Node[], depth: number): HTMLElement => {
+  const convert = (nodes: Node[]): Promise<OutlineItem[]> =>
+    Promise.all(
+      nodes.map(async (n) => ({
+        id: uid("bm"),
+        title: n.title,
+        ...(n.url ? { url: n.url, page: null } : await resolve(n.dest)),
+        items: await convert(n.items ?? []),
+      })),
+    );
+  return convert(outline as unknown as Node[]);
+}
+
+export interface OutlineHost {
+  /** Shows a page, at a vertical position in PDF user space when given. */
+  goTo(index: number, top: number | null): void;
+  /** Index of the page in view. */
+  current(): number;
+}
+
+/** Where a bookmark sits: the list holding it, its index there, and the bookmark that holds the list. */
+function locate(list: OutlineItem[], id: string, parent: OutlineItem | null = null): { list: OutlineItem[]; i: number; parent: OutlineItem | null } | null {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].id === id) return { list, i, parent };
+    const r = locate(list[i].items, id, list[i]);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** Bookmarks that are shown expanded, per document. */
+const openItems = new WeakMap<DocSession, Set<string>>();
+let outlineRender = 0;
+
+/** Bookmarks of the document, with adding, renaming, moving and deleting. */
+export async function renderOutline(doc: DocSession, container: HTMLElement, host: OutlineHost): Promise<void> {
+  const token = ++outlineRender;
+  const items = doc.outline ?? (await loadOutline(doc));
+  if (token !== outlineRender) return;
+  let open = openItems.get(doc);
+  if (!open) {
+    open = new Set(items.filter((n) => n.items.length).map((n) => n.id));
+    openItems.set(doc, open);
+  }
+  const opened = open;
+
+  const edit = (fn: (list: OutlineItem[]) => void) => {
+    const next = structuredClone(items);
+    fn(next);
+    doc.change("meta", () => (doc.outline = next));
+  };
+  const rename = async (n: OutlineItem) => {
+    const v = await promptDialog(t("rename"), t("bookmarkTitle"), n.title);
+    if (v?.trim() && v.trim() !== n.title) edit((l) => (locate(l, n.id)!.list.find((x) => x.id === n.id)!.title = v.trim()));
+  };
+  const add = async () => {
+    const cur = host.current();
+    const ref = doc.pages[cur];
+    if (!ref) return;
+    const v = await promptDialog(t("bookmarkAdd"), t("bookmarkTitle"), `${t("page")} ${cur + 1}`);
+    if (!v?.trim()) return;
+    edit((l) => {
+      // Top level, in page order.
+      const at = l.findIndex((x) => x.page !== null && doc.pageIndex(x.page) > cur);
+      l.splice(at < 0 ? l.length : at, 0, { id: uid("bm"), title: v.trim(), page: ref.id, top: null, items: [] });
+    });
+  };
+  const menu = (n: OutlineItem, x: number, y: number) => {
+    const at = locate(items, n.id)!;
+    showMenu(
+      [
+        { label: t("rename"), icon: "pen", action: () => rename(n) },
+        { label: t("bookmarkToPage"), icon: "bookmark", action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          Object.assign(it.list[it.i], { page: doc.pages[host.current()]?.id ?? null, top: null, url: undefined });
+        }) },
+        { separator: true },
+        { label: t("moveUp"), icon: "arrowUp", disabled: at.i === 0, action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          it.list.splice(it.i - 1, 0, ...it.list.splice(it.i, 1));
+        }) },
+        { label: t("moveDown"), icon: "arrowDown", disabled: at.i === at.list.length - 1, action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          it.list.splice(it.i + 1, 0, ...it.list.splice(it.i, 1));
+        }) },
+        { label: t("indent"), icon: "indent", disabled: at.i === 0, action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          const prev = it.list[it.i - 1];
+          prev.items.push(...it.list.splice(it.i, 1));
+          opened.add(prev.id);
+        }) },
+        { label: t("outdent"), icon: "outdent", disabled: !at.parent, action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          const up = locate(l, it.parent!.id)!;
+          up.list.splice(up.i + 1, 0, ...it.list.splice(it.i, 1));
+        }) },
+        { separator: true },
+        { label: t("delete"), icon: "trash", danger: true, action: () => edit((l) => {
+          const it = locate(l, n.id)!;
+          it.list.splice(it.i, 1);
+        }) },
+      ],
+      x, y,
+    );
+  };
+
+  const build = (nodes: OutlineItem[]): HTMLElement => {
     const ul = h("ul", { class: "outline-list" });
     for (const n of nodes) {
-      const hasKids = n.items?.length > 0;
-      const li = h("li", { class: depth < 1 && hasKids ? "open" : "" });
+      const hasKids = n.items.length > 0;
+      const li = h("li", { class: hasKids && opened.has(n.id) ? "open" : "" });
       const toggle = h("button", { class: `outline-toggle ${hasKids ? "" : "leaf"}`, tabIndex: -1 }, hasKids ? "▸" : "");
-      const btn = h("button", { class: "outline-item", title: n.title }, toggle, h("span", {}, n.title));
+      const index = n.page ? doc.pageIndex(n.page) : -1;
+      const btn = h("button", { class: `outline-item ${!n.url && index < 0 ? "missing" : ""}`, title: n.title }, toggle, h("span", {}, n.title));
       toggle.addEventListener("click", (e) => {
         e.stopPropagation();
-        li.classList.toggle("open");
+        if (li.classList.toggle("open")) opened.add(n.id);
+        else opened.delete(n.id);
       });
-      btn.addEventListener("click", async () => {
-        if (n.url) return;
-        const idx = await resolve(n.dest);
-        if (idx != null) goTo(idx);
+      btn.addEventListener("click", () => {
+        if (index >= 0) host.goTo(index, n.top ?? null);
+      });
+      btn.addEventListener("dblclick", () => rename(n));
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        menu(n, e.clientX, e.clientY);
       });
       li.append(btn);
-      if (hasKids) li.append(build(n.items, depth + 1));
+      if (hasKids) li.append(build(n.items));
       ul.append(li);
     }
     return ul;
   };
-  container.append(build(outline as unknown as Node[], 0));
+  const addBtn = h("button", { class: "btn small outline-add" }, icon("bookmarkPlus", 15), t("bookmarkAdd"));
+  addBtn.addEventListener("click", add);
+  container.replaceChildren(
+    addBtn,
+    items.length ? build(items) : h("div", { class: "empty-note" }, t("noOutline")),
+  );
 }

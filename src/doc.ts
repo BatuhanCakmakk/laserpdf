@@ -1,4 +1,4 @@
-import type { Asset, DocMeta, Obj, PageRef, Source } from "./model";
+import type { Asset, DocMeta, Obj, OutlineItem, PageRef, Source } from "./model";
 import { uid } from "./model";
 import { loadPdf } from "./engine";
 
@@ -6,6 +6,7 @@ interface Snapshot {
   pages: PageRef[];
   objects: Obj[];
   meta: DocMeta;
+  outline: OutlineItem[] | null;
 }
 
 type Listener = (kind: ChangeKind) => void;
@@ -24,13 +25,21 @@ export class DocSession {
   objects: Obj[] = [];
   assets = new Map<string, Asset>();
   meta: DocMeta = { title: "", author: "", subject: "", keywords: "" };
+  /** Edited bookmarks; null while the source's own bookmarks are untouched. */
+  outline: OutlineItem[] | null = null;
   dirty = false;
+  /** Grows with every change, so autosave knows when there is something new to keep. */
+  revision = 0;
   /** Scroll/zoom state remembered when switching tabs. */
   view = { scale: 0, scrollTop: 0, scrollLeft: 0, fit: "width" as "width" | "page" | null };
 
   private undoStack: Snapshot[] = [];
   private redoStack: Snapshot[] = [];
   private listeners = new Set<Listener>();
+  /** The state as last saved (or opened); null when the document has never been saved. */
+  private savedState: string | null = null;
+  /** Changes that are not part of the undo history, such as typing into form fields. */
+  private untracked = false;
 
   constructor(name: string, path: string | null = null) {
     this.name = name;
@@ -54,13 +63,14 @@ export class DocSession {
     } catch {
       /* metadata is optional */
     }
+    doc.markSaved();
     return doc;
   }
 
   static blank(name: string, w = 595.28, h = 841.89, count = 1): DocSession {
     const doc = new DocSession(name, null);
     for (let i = 0; i < count; i++) doc.pages.push(blankPage(w, h));
-    doc.dirty = true;
+    doc.markNew();
     return doc;
   }
 
@@ -70,7 +80,9 @@ export class DocSession {
     this.sources.set(src.id, src);
     // Typing into form fields counts as an unsaved change.
     (pdf.annotationStorage as unknown as { onSetModified: () => void }).onSetModified = () => {
+      this.untracked = true;
       this.dirty = true;
+      this.revision++;
       this.emit("meta");
     };
     return src;
@@ -112,7 +124,25 @@ export class DocSession {
       pages: this.pages.map((p) => ({ ...p })),
       objects: structuredClone(this.objects),
       meta: { ...this.meta },
+      outline: structuredClone(this.outline),
     };
+  }
+
+  private fingerprint(): string {
+    return JSON.stringify([this.pages, this.objects, this.meta, this.outline]);
+  }
+
+  /** The current state is what is on disk. */
+  markSaved(): void {
+    this.savedState = this.fingerprint();
+    this.untracked = false;
+    this.dirty = false;
+  }
+
+  /** A document that was never saved, such as one made from images. */
+  markNew(): void {
+    this.savedState = null;
+    this.dirty = true;
   }
 
   /** Records the current state so the next change can be undone. */
@@ -131,6 +161,7 @@ export class DocSession {
 
   markDirty(kind: ChangeKind): void {
     this.dirty = true;
+    this.revision++;
     this.emit(kind);
     if (kind !== "meta") this.emit("meta");
   }
@@ -168,7 +199,10 @@ export class DocSession {
     this.pages = s.pages;
     this.objects = s.objects;
     this.meta = s.meta;
-    this.dirty = true;
+    this.outline = s.outline;
+    // Undoing back to the saved state leaves nothing to save.
+    this.dirty = this.untracked || this.savedState === null || this.fingerprint() !== this.savedState;
+    this.revision++;
     if (pagesChanged) this.emit("pages");
     this.emit("objects");
     this.emit("meta");

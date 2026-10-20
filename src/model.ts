@@ -102,7 +102,27 @@ export interface NoteObj extends ObjBase {
   color: string;
 }
 
-export type Obj = TextObj | ImageObj | InkObj | ShapeObj | MarkObj | NoteObj;
+/** A clickable area that opens a web address or goes to a page of the document. */
+export interface LinkObj extends ObjBase {
+  type: "link";
+  url?: string;
+  /** Target page id. */
+  dest?: string;
+}
+
+export type Obj = TextObj | ImageObj | InkObj | ShapeObj | MarkObj | NoteObj | LinkObj;
+
+/** A bookmark. */
+export interface OutlineItem {
+  id: string;
+  title: string;
+  /** Target page id; null when the page is gone or the bookmark opens a web address. */
+  page: string | null;
+  /** Vertical position on the target page in PDF user space, when known. */
+  top?: number | null;
+  url?: string;
+  items: OutlineItem[];
+}
 
 export interface Asset {
   id: string;

@@ -21,10 +21,13 @@ const output = () => import("./output");
 import { rotatePages, deletePages, duplicatePages, insertBlank, insertFiles, isPdfFile, isImageFile, imageAsset } from "./pages";
 import {
   signatureDialog, pageNumbersDialog, watermarkDialog, propertiesDialog, insertBlankDialog, exportImageDialog,
-  compressDialog, shortcutsDialog, aboutDialog, logo, uprightBox, formatBytes,
+  compressDialog, shortcutsDialog, aboutDialog, logo, uprightBox, formatBytes, namedStampDialog, stampDateTime,
+  linkDialog, cropDialog, bookletDialog,
 } from "./dialogs";
-import type { ImageObj, NoteObj, Obj, PageRef, TextObj, FontFamily } from "./model";
-import { displaySize, uid } from "./model";
+import type { ImageObj, LinkObj, NoteObj, Obj, PageRef, TextObj, FontFamily } from "./model";
+import { displaySize, pageRotation, uid } from "./model";
+import { linkTarget } from "./objects";
+import { Recovery } from "./recovery";
 import { PasswordCancelled, getTextItems } from "./engine";
 import { ensureFonts } from "./fonts";
 
@@ -107,6 +110,7 @@ export class App {
   private unsub: (() => void) | null = null;
   private lastShape: Tool = "rect";
   private lastMarkup: Tool = "highlight";
+  private recovery = new Recovery();
 
   async init(): Promise<void> {
     document.documentElement.lang = locale();
@@ -129,13 +133,8 @@ export class App {
     this.buildTitlebar();
     this.viewer = new Viewer(this.stageEl, {
       goToSourcePage: (srcId, index, top) => {
-        const doc = this.active;
-        const i = doc ? doc.pages.findIndex((p) => p.src === srcId && p.index === index) : -1;
-        if (i < 0 || !doc) return;
-        const ref = doc.pages[i];
-        // Only offset into the page for unrotated pages, where PDF y maps directly.
-        const off = top != null && (ref.baseRot + ref.rot) % 360 === 0 ? Math.max(0, (ref.vy + ref.h - top) * this.viewer.scale) : 0;
-        this.viewer.scrollToPage(i, false, off);
+        const i = this.active ? this.active.pages.findIndex((p) => p.src === srcId && p.index === index) : -1;
+        if (i >= 0) this.goToPage(i, top);
       },
       openUrl: (url) => platform.openUrl(url),
       onPageCreated: (pv) => this.interaction.attach(pv),
@@ -149,9 +148,14 @@ export class App {
     });
     this.interaction = new Interaction(this.viewer, {
       editNote: (o) => this.editNote(o),
+      editLink: (o) => void this.editLink(o),
       contextMenu: (o, x, y) => this.objectMenu(o, x, y),
       toast: (k) => toast(t(k as Key)),
-      tableRegion: (pv, r) => void this.exportTable(pv.ref, r),
+      region: (pv, r, tool) => {
+        if (tool === "table") void this.exportTable(pv.ref, r);
+        else if (tool === "crop") void this.cropPages(pv.ref, r);
+        else void this.addLink(pv.ref, r);
+      },
     });
     this.search = new SearchBar(this.viewer, this.interaction);
     this.stageEl.append(this.search.el);
@@ -183,6 +187,7 @@ export class App {
     });
     platform.onCloseRequested(async () => {
       for (const d of [...this.docs]) if (!(await this.confirmClose(d))) return false;
+      await this.recovery.forgetAll();
       return true;
     });
     window.addEventListener("paste", (e) => this.onPaste(e));
@@ -193,6 +198,63 @@ export class App {
     // Files passed on the command line ("Open with").
     const files = await platform.startupFiles();
     for (const p of files) await this.openPath(p);
+
+    await this.recovery.init();
+    if (this.recovery.enabled) {
+      await this.offerRecovery();
+      setInterval(() => void this.recovery.save(this.docs), 30_000);
+    }
+  }
+
+  /** Shows a page, at a vertical position in PDF user space when given. */
+  private goToPage(i: number, top: number | null = null): void {
+    const ref = this.active?.pages[i];
+    if (!ref) return;
+    // Only offset into the page for unrotated pages, where PDF y maps directly.
+    const off = top != null && (ref.baseRot + ref.rot) % 360 === 0 ? Math.max(0, (ref.vy + ref.h - top) * this.viewer.scale) : 0;
+    this.viewer.scrollToPage(i, false, off);
+  }
+
+  private outlineHost = {
+    goTo: (i: number, top: number | null) => this.goToPage(i, top),
+    current: () => this.viewer.currentIndex,
+  };
+
+  /** Offers to restore documents autosaved by a session that ended unexpectedly. */
+  private async offerRecovery(): Promise<void> {
+    const list = await this.recovery.pending();
+    if (!list.length) return;
+    const r = await modal<"restore" | "discard" | null>({
+      title: t("recoveryTitle"),
+      body: h("div", {},
+        h("p", { class: "modal-text" }, t("recoveryMsg")),
+        h("ul", { class: "recovery-list" },
+          ...list.map((x) => h("li", {}, h("b", {}, x.state.name), h("span", { class: "muted" }, new Date(x.state.time).toLocaleString(locale(), { dateStyle: "medium", timeStyle: "short" })))),
+        ),
+      ),
+      buttons: [
+        { label: t("recoveryDiscard"), value: "discard", danger: true },
+        { label: t("recoveryRestore"), value: "restore", primary: true },
+      ],
+      cancelValue: null,
+    });
+    if (r === "discard") {
+      for (const x of list) await this.recovery.discard(x.key);
+    } else if (r === "restore") {
+      let n = 0;
+      for (const x of list) {
+        try {
+          const doc = await this.recovery.restore(x, (name) => this.passwordAsker(name));
+          this.addDoc(doc);
+          await this.recovery.discard(x.key);
+          n++;
+        } catch (e) {
+          console.error(e);
+          if (!(e instanceof PasswordCancelled)) toast(t("openFailed", { name: x.state.name }), "error");
+        }
+      }
+      if (n) toast(t("recovered", { n }), "success");
+    }
   }
 
   // ------------------------------------------------------------- titlebar
@@ -360,6 +422,7 @@ export class App {
     const image = this.btn("image", t("addImage"), () => this.addImage(), undefined, t("tb_image"));
     const sign = this.btn("signature", t("signature"), () => this.addSignature(), undefined, t("tb_sign"));
     const stamp = this.btn("stamp", t("stamp"), () => this.stampMenu(stamp), undefined, t("tb_stamp"));
+    const link = this.toolBtn({ tool: "link", icon: "link" });
     const whiteout = this.toolBtn({ tool: "whiteout", icon: "whiteout", key: "W" });
     const note = this.toolBtn({ tool: "note", icon: "note", key: "N" });
 
@@ -411,7 +474,7 @@ export class App {
       group(this.undoBtn, this.redoBtn),
       group(...TOOLS.map((d) => this.toolBtn(d))),
       group(markup.wrap, shapes.wrap, whiteout, note),
-      group(image, sign, stamp),
+      group(image, sign, stamp, link),
       docTools,
       h("div", { class: "tb-spacer" }),
       group(prev, h("div", { class: "page-nav" }, this.pageInput, this.pageTotal), next),
@@ -597,9 +660,12 @@ export class App {
           items.push(colorButton({ value: sel.color, title: t("color"), onChange: (c) => update((x) => ((x as typeof sel).color = c!)) }));
           items.push(this.btn("note", t("noteTitle"), () => this.editNote(sel)));
           break;
+        case "link":
+          items.push(h("span", { class: "prop-hint" }, icon("link", 15), linkTarget(sel, doc)), this.btn("pen", t("linkEdit"), () => this.editLink(sel)));
+          break;
       }
       items.push(h("div", { class: "prop-spacer" }));
-      if (sel.type !== "note" && sel.type !== "mark") items.push(this.btn("rotateCw", t("rotateObj"), () => update((x) => (x.rot = (Math.round(x.rot / 90) * 90 + 90) % 360))));
+      if (sel.type !== "note" && sel.type !== "mark" && sel.type !== "link") items.push(this.btn("rotateCw", t("rotateObj"), () => update((x) => (x.rot = (Math.round(x.rot / 90) * 90 + 90) % 360))));
       items.push(
         this.btn("front", t("bringFront"), () => this.interaction.arrange("front")),
         this.btn("back", t("sendBack"), () => this.interaction.arrange("back")),
@@ -662,6 +728,12 @@ export class App {
         case "table":
           hint("tableHint");
           break;
+        case "crop":
+          hint("cropHint");
+          break;
+        case "link":
+          hint("linkHint");
+          break;
         case "note":
           items.push(colorButton({ value: settings.noteColor, title: t("color"), onChange: (c) => { settings.noteColor = c!; saveSettings(); } }));
           hint("noteHint");
@@ -687,7 +759,7 @@ export class App {
       b.addEventListener("click", () => {
         this.sidebarTab = k;
         this.buildSidebar();
-        if (k === "outline" && this.active) renderOutline(this.active, this.outlineEl, (i) => this.viewer.scrollToPage(i));
+        if (k === "outline" && this.active) renderOutline(this.active, this.outlineEl, this.outlineHost);
         if (k === "annots") this.renderAnnotations();
       });
       return b;
@@ -720,7 +792,7 @@ export class App {
   private renderAnnotations(): void {
     const doc = this.active;
     if (!doc || this.sidebarTab !== "annots") return;
-    const ICON: Record<string, string> = { text: "text", image: "image", ink: "draw", shape: "rect", mark: "highlight", note: "note" };
+    const ICON: Record<string, string> = { text: "text", image: "image", ink: "draw", shape: "rect", mark: "highlight", note: "note", link: "link" };
     const groups = doc.pages
       .map((p, i) => ({ i, objs: doc.objectsOn(p.id).filter((o) => !(o.type === "shape" && o.cover)) }))
       .filter((g) => g.objs.length);
@@ -734,7 +806,7 @@ export class App {
           h("div", { class: "annot-page" }, `${t("page")} ${g.i + 1}`),
           ...g.objs.map((o) => {
             const label =
-              o.type === "text" || o.type === "note" ? o.text || t(`kind_${o.type}`) : t(`kind_${o.type}` as Key);
+              o.type === "text" || o.type === "note" ? o.text || t(`kind_${o.type}`) : o.type === "link" ? linkTarget(o, doc) : t(`kind_${o.type}` as Key);
             const item = h("button", { class: `annot-item ${o.id === editor.selected ? "active" : ""}`, title: label },
               h("span", { class: "annot-icon", style: { color: "color" in o ? o.color : "stroke" in o && o.stroke ? o.stroke : "" } }, icon(ICON[o.type] ?? "file", 15)),
               h("span", { class: "annot-label" }, label.split("\n")[0]),
@@ -746,6 +818,7 @@ export class App {
             });
             item.addEventListener("dblclick", () => {
               if (o.type === "note") this.editNote(o);
+              else if (o.type === "link") void this.editLink(o);
               else if (o.type === "text") this.interaction.startEdit(o.id);
             });
             return item;
@@ -852,6 +925,7 @@ export class App {
       { separator: true },
       { label: t("extractPages"), icon: "extract", action: () => this.extractPages(ids) },
       { label: t("exportImage"), icon: "fileImage", action: () => this.exportImage(first) },
+      { label: t("crop"), icon: "crop", action: () => this.setTool("crop") },
       { label: t("ocr"), icon: "ocr", action: () => this.recognizeText(ids) },
       { label: t("flattenPages"), icon: "lock", action: () => this.flattenPages(ids) },
       { separator: true },
@@ -1040,7 +1114,7 @@ export class App {
       assets.forEach((a) => URL.revokeObjectURL(a.url));
       const name = (images.length === 1 ? images[0].name.replace(/\.[^.]+$/, "") : t("untitled")) + ".pdf";
       const doc = await DocSession.fromBytes(bytes, name, null);
-      doc.dirty = true;
+      doc.markNew();
       this.addDoc(doc);
       void this.suggestOcr(doc);
     } catch (e) {
@@ -1059,7 +1133,7 @@ export class App {
       const doc = new DocSession(t("untitled") + ".pdf");
       await insertFiles(doc, 0, files, (name) => this.passwordAsker(name));
       if (!doc.pages.length) return;
-      doc.dirty = true;
+      doc.markNew();
       this.addDoc(doc);
     } catch (e) {
       if (!(e instanceof PasswordCancelled)) toast(t("openFailed", { name: files.map((f) => f.name).join(", ") }), "error");
@@ -1096,7 +1170,7 @@ export class App {
     this.grid.setDoc(doc);
     if (doc) {
       this.unsub = doc.on((kind) => this.onDocChange(doc, kind));
-      if (this.sidebarTab === "outline") renderOutline(doc, this.outlineEl, (i) => this.viewer.scrollToPage(i));
+      if (this.sidebarTab === "outline") renderOutline(doc, this.outlineEl, this.outlineHost);
       this.renderAnnotations();
     }
     this.updateAll();
@@ -1118,6 +1192,8 @@ export class App {
       this.buildPropbar();
       this.renderAnnotations();
     }
+    // Bookmarks change with "meta"; page changes can break or restore their targets.
+    if (this.sidebarTab === "outline" && kind !== "objects") renderOutline(doc, this.outlineEl, this.outlineHost);
     this.updateChrome();
   }
 
@@ -1180,6 +1256,7 @@ export class App {
     }
     clearThumbs(doc.id);
     doc.destroy();
+    void this.recovery.forget(doc.id);
     this.updateAll();
   }
 
@@ -1241,7 +1318,8 @@ export class App {
         this.addRecent(path, doc.name);
         toast(t("savedTo", { path: doc.name }), "success");
       } else toast(t("saved"), "success");
-      doc.dirty = false;
+      doc.markSaved();
+      void this.recovery.forget(doc.id);
       this.updateChrome();
       return true;
     } catch (e) {
@@ -1482,6 +1560,107 @@ export class App {
     }
   }
 
+  /**
+   * Crops pages to the area selected on one page. Other pages get the same margins, as seen on
+   * screen. The crop box is set in a copy of the source, so the page keeps its text and links.
+   */
+  private async cropPages(ref0: PageRef, r: { x: number; y: number; w: number; h: number }): Promise<void> {
+    const doc = this.active;
+    if (!doc) return;
+    const sel = this.grid.selected();
+    const which = await cropDialog(sel.length);
+    if (!which) return;
+    const targets = which === "this" ? [ref0] : which === "all" ? doc.pages : doc.pages.filter((p) => sel.includes(p.id));
+    // Margins of the unrotated page, clockwise from the top; then as displayed.
+    const own = [r.y, ref0.w - r.x - r.w, ref0.h - r.y - r.h, r.x];
+    const k0 = pageRotation(ref0) / 90;
+    const shown = [0, 1, 2, 3].map((i) => own[(i - k0 + 4) % 4]);
+    const next = new Map<string, PageRef>();
+    const shift = new Map<string, { dx: number; dy: number }>();
+    const boxes = new Map<string, Map<number, [number, number, number, number]>>();
+    for (const ref of targets) {
+      const k = pageRotation(ref) / 90;
+      const [top, right, bottom, left] = [0, 1, 2, 3].map((j) => shown[(j + k) % 4]);
+      const w = ref.w - left - right;
+      const hh = ref.h - top - bottom;
+      if (w < 10 || hh < 10) continue;
+      const box: [number, number, number, number] = [ref.vx + left, ref.vy + bottom, ref.vx + left + w, ref.vy + bottom + hh];
+      if (ref.src) {
+        const m = boxes.get(ref.src) ?? new Map<number, [number, number, number, number]>();
+        boxes.set(ref.src, m);
+        // The same source page twice with different crops: only the first one is cropped.
+        if (m.has(ref.index) && m.get(ref.index)!.join() !== box.join()) continue;
+        m.set(ref.index, box);
+      }
+      next.set(ref.id, { ...ref, vx: box[0], vy: box[1], w, h: hh });
+      shift.set(ref.id, { dx: left, dy: top });
+    }
+    if (!next.size) return;
+    busy(true, t("processing"));
+    try {
+      const { croppedSource, EncryptedSourceError } = await exporter();
+      const copies = new Map<string, string>();
+      try {
+        for (const [srcId, m] of boxes) {
+          const old = doc.sources.get(srcId)!;
+          const src = await doc.addSource(await croppedSource(old, m), old.name);
+          copies.set(srcId, src.id);
+        }
+      } catch (e) {
+        if (e instanceof EncryptedSourceError) {
+          toast(t("cropEncrypted"), "error", 4500);
+          return;
+        }
+        throw e;
+      }
+      doc.change("pages", () => {
+        doc.pages = doc.pages.map((p) => {
+          const n = next.get(p.id);
+          if (n) return { ...n, src: n.src ? copies.get(n.src)! : null };
+          // The rest of a cropped source moves to the copy too, so it stays one document on save.
+          if (p.src && copies.has(p.src) && !boxes.get(p.src)!.has(p.index)) return { ...p, src: copies.get(p.src)! };
+          return p;
+        });
+        for (const o of doc.objects) {
+          const d = shift.get(o.page);
+          if (d) {
+            o.x -= d.dx;
+            o.y -= d.dy;
+          }
+        }
+      });
+      doc.emit("objects");
+      toast(t("cropped", { n: next.size }), "success");
+    } catch (e) {
+      toast(t("saveFailed", { err: String(e) }), "error");
+    } finally {
+      busy(false);
+    }
+  }
+
+  /** Makes a booklet of the document and opens it in a new tab. */
+  private async makeBooklet(): Promise<void> {
+    const doc = this.active;
+    if (!doc) return;
+    const opts = await bookletDialog();
+    if (!opts) return;
+    busy(true, t("processing"));
+    try {
+      const bytes = await this.buildBytes(doc);
+      if (!bytes) return;
+      const { bookletPdf } = await exporter();
+      const out = await bookletPdf(bytes, opts);
+      const booklet = await DocSession.fromBytes(out, doc.name.replace(/\.pdf$/i, "") + `-${t("bookletFile")}.pdf`, null);
+      booklet.markNew();
+      this.addDoc(booklet);
+      toast(t("bookletDone"), "success", 7000);
+    } catch (e) {
+      toast(t("saveFailed", { err: String(e) }), "error");
+    } finally {
+      busy(false);
+    }
+  }
+
   private async compress(): Promise<void> {
     const doc = this.active;
     if (!doc) return;
@@ -1562,7 +1741,8 @@ export class App {
 
   private stampMenu(anchor: HTMLElement): void {
     const make = (text: string, color: string) => () => this.placeStamp(text, color);
-    const date = new Date().toLocaleDateString(locale());
+    const date = stampDateTime(true, false);
+    const dateTime = stampDateTime(true, true);
     showMenu(
       [
         { label: t("stampApproved"), icon: "check", action: make(t("stampApproved"), "#1f8a4c") },
@@ -1572,6 +1752,15 @@ export class App {
         { label: t("stampRejected"), icon: "x", action: make(t("stampRejected"), "#c81d4e") },
         { separator: true },
         { label: `${t("stampDate")} · ${date}`, icon: "clock", action: make(date, "#2563eb") },
+        { label: `${t("stampDateTime")} · ${dateTime}`, icon: "history", action: make(dateTime, "#2563eb") },
+        {
+          label: t("stampNamed"),
+          icon: "userStamp",
+          action: async () => {
+            const r = await namedStampDialog();
+            if (r) this.placeStamp(r.text, r.color, 14);
+          },
+        },
         {
           label: t("stampCustom"),
           icon: "stamp",
@@ -1585,14 +1774,14 @@ export class App {
     );
   }
 
-  private async placeStamp(text: string, color: string): Promise<void> {
+  private async placeStamp(text: string, color: string, size = 20): Promise<void> {
     await ensureFonts(text);
     const doc = this.active;
     if (!doc) return;
     this.interaction.placeOnCurrentPage((pageId) => {
       const ref = doc.page(pageId)!;
       const o: TextObj = {
-        id: uid("o"), page: pageId, type: "text", text, font: "sans", bold: true, italic: false, size: 20,
+        id: uid("o"), page: pageId, type: "text", text, font: "sans", bold: true, italic: false, size,
         color, align: "center", bg: null, border: color, x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: 0.9,
       };
       this.interaction.measureText(o);
@@ -1601,6 +1790,37 @@ export class App {
       const { w: dw, h: dh } = displaySize(ref);
       Object.assign(o, uprightBox(ref, (dw - o.w) / 2, dh * 0.15, o.w, o.h));
       return o;
+    });
+  }
+
+  /** Creates a link over an area drawn with the link tool. */
+  private async addLink(ref: PageRef, r: { x: number; y: number; w: number; h: number }): Promise<void> {
+    const doc = this.active;
+    if (!doc) return;
+    const target = await linkDialog({}, doc.pages.length);
+    if (!target) return;
+    const o: LinkObj = { id: uid("o"), page: ref.id, type: "link", x: r.x, y: r.y, w: r.w, h: r.h, rot: 0, opacity: 1 };
+    if ("url" in target) o.url = target.url;
+    else o.dest = doc.pages[target.page - 1].id;
+    doc.change("objects", () => doc.objects.push(o));
+    editor.select(o.id);
+  }
+
+  private async editLink(o: LinkObj): Promise<void> {
+    const doc = this.active;
+    if (!doc) return;
+    const page = o.dest ? doc.pageIndex(o.dest) + 1 : 0;
+    const target = await linkDialog({ url: o.url, page: page > 0 ? page : undefined }, doc.pages.length);
+    if (!target) return;
+    this.interaction.updateSelected((x) => {
+      const l = x as LinkObj;
+      if ("url" in target) {
+        l.url = target.url;
+        delete l.dest;
+      } else {
+        l.dest = doc.pages[target.page - 1].id;
+        delete l.url;
+      }
     });
   }
 
@@ -1635,6 +1855,7 @@ export class App {
     const items: MenuItem[] = [];
     if (o.type === "text") items.push({ label: t("tool_edittext"), icon: "edittext", action: () => this.interaction.startEdit(o.id) });
     if (o.type === "note") items.push({ label: t("noteTitle"), icon: "note", action: () => this.editNote(o) });
+    if (o.type === "link") items.push({ label: t("linkEdit"), icon: "link", action: () => this.editLink(o) });
     items.push(
       { label: t("cut"), icon: "split", shortcut: `${MOD}+X`, action: () => this.interaction.cutSelected() },
       { label: t("copy"), icon: "copy", shortcut: `${MOD}+C`, action: () => this.interaction.copySelected() },
@@ -1663,11 +1884,13 @@ export class App {
         { label: t("insertBlank"), icon: "blankPage", action: () => this.insertBlankPages() },
         { label: t("extractPages"), icon: "extract", action: () => this.extractPages(this.selectedPages()) },
         { label: t("splitDoc"), icon: "split", action: () => this.splitDocument() },
+        { label: t("crop"), icon: "crop", action: () => this.setTool("crop") },
         { separator: true },
         { label: t("pageNumbers"), icon: "hash", action: () => pageNumbersDialog(doc, this.grid.selected(), measure) },
         { label: t("watermark"), icon: "watermark", action: () => watermarkDialog(doc, this.grid.selected(), measure) },
         { label: t("exportImage"), icon: "fileImage", action: () => this.exportImage() },
         { label: t("compress"), icon: "compress", action: () => this.compress() },
+        { label: t("booklet"), icon: "booklet", action: () => this.makeBooklet() },
         { label: t("ocr"), icon: "ocr", action: () => this.recognizeText(doc.pages.map((p) => p.id)) },
         { label: t("tableToExcel"), icon: "sheet", action: () => editor.setTool("table") },
         { separator: true },

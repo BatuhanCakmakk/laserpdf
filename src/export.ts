@@ -5,6 +5,8 @@ import {
   PDFArray,
   PDFDict,
   PDFDocument,
+  PDFHexString,
+  PDFNumber,
   PDFRef,
   PDFStream,
   PDFFont,
@@ -21,7 +23,7 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import type { DocSession } from "./doc";
-import type { FontFamily, Obj, PageRef, ShapeObj, Source, TextObj } from "./model";
+import type { FontFamily, LinkObj, Obj, OutlineItem, PageRef, ShapeObj, Source, TextObj } from "./model";
 import { pageRotation } from "./model";
 import { cjkFontFile, cjkOrder, fallbackFontFile, fontFile, firstBaseline, hasCjk, LINE_HEIGHT, TEXT_PAD } from "./fonts";
 import { arrowHead, inkPath } from "./objects";
@@ -77,20 +79,20 @@ export interface ExportOptions {
   objects?: boolean;
 }
 
+/** The source's bytes; pdf.js writes filled-in form values into them. */
+async function sourceBytes(src: Source): Promise<Uint8Array> {
+  try {
+    if (src.pdf.annotationStorage.size > 0) return await src.pdf.saveDocument();
+  } catch (e) {
+    console.warn("form save failed", e);
+  }
+  return src.bytes;
+}
+
 /** Builds the edited PDF. */
 export async function exportPdf(doc: DocSession, opts: ExportOptions = {}): Promise<Uint8Array> {
   const pages = opts.pages ?? doc.pages;
   const loaded = new Map<string, PDFDocument | "raster">();
-
-  // pdf.js can write filled-in form values into the source bytes.
-  const sourceBytes = async (src: Source): Promise<Uint8Array> => {
-    try {
-      if (src.pdf.annotationStorage.size > 0) return await src.pdf.saveDocument();
-    } catch (e) {
-      console.warn("form save failed", e);
-    }
-    return src.bytes;
-  };
 
   const loadSource = async (id: string): Promise<PDFDocument | "raster"> => {
     let d = loaded.get(id);
@@ -179,10 +181,155 @@ export async function exportPdf(doc: DocSession, opts: ExportOptions = {}): Prom
     for (const o of [...covers, ...rest]) await ctx.draw(finalPages[i], ref, o);
   }
 
+  // Links and bookmarks point at pages of the new file.
+  const pageRefs = new Map(pages.map((p, i) => [p.id, finalPages[i].ref]));
+  if (opts.objects !== false) {
+    pages.forEach((ref, i) => {
+      for (const o of doc.objectsOn(ref.id)) if (o.type === "link") addLink(out, finalPages[i], ref, o, pageRefs);
+    });
+  }
+  if (doc.outline) writeOutline(out, doc.outline, pageRefs);
+
   writeMetadata(out, doc.meta);
 
   removeUnreachable(out, new Set(finalPages.map((p) => p.ref)));
 
+  return out.save({ useObjectStreams: true });
+}
+
+/** Adds a link annotation covering the object's box. */
+function addLink(out: PDFDocument, page: PDFPage, ref: PageRef, o: LinkObj, pageRefs: Map<string, PDFRef>): void {
+  const ctx = out.context;
+  let action: PDFDict | null = null;
+  let dest: PDFArray | null = null;
+  if (o.url) action = ctx.obj({ S: "URI", URI: PDFString.of(o.url) });
+  else if (o.dest && pageRefs.has(o.dest)) dest = ctx.obj([pageRefs.get(o.dest)!, "XYZ", null, null, null]);
+  else return;
+  // Bounding box of the (possibly rotated) box, in PDF user space.
+  const th = (o.rot * Math.PI) / 180;
+  const hw = (Math.abs(Math.cos(th)) * o.w + Math.abs(Math.sin(th)) * o.h) / 2;
+  const hh = (Math.abs(Math.sin(th)) * o.w + Math.abs(Math.cos(th)) * o.h) / 2;
+  const cx = o.x + o.w / 2;
+  const cy = o.y + o.h / 2;
+  const { x: vx, y: vy } = page.getCropBox();
+  const annot = ctx.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [vx + cx - hw, vy + ref.h - cy - hh, vx + cx + hw, vy + ref.h - cy + hh],
+    Border: [0, 0, 0],
+    F: 4,
+  });
+  if (action) annot.set(PDFName.of("A"), action);
+  if (dest) annot.set(PDFName.of("Dest"), dest);
+  const r = ctx.register(annot);
+  const annots = page.node.lookup(PDFName.of("Annots"));
+  if (annots instanceof PDFArray) annots.push(r);
+  else page.node.set(PDFName.of("Annots"), ctx.obj([r]));
+}
+
+/**
+ * Replaces the document's bookmarks. Bookmarks to pages that are not in the file are left out,
+ * unless they hold other bookmarks.
+ */
+function writeOutline(out: PDFDocument, items: OutlineItem[], pageRefs: Map<string, PDFRef>): void {
+  const ctx = out.context;
+  const keep = (it: OutlineItem): OutlineItem | null => {
+    const kids = it.items.map(keep).filter((x): x is OutlineItem => !!x);
+    if (!kids.length && !it.url && !(it.page && pageRefs.has(it.page))) return null;
+    return { ...it, items: kids };
+  };
+  const list = items.map(keep).filter((x): x is OutlineItem => !!x);
+  out.catalog.delete(PDFName.of("Outlines"));
+  if (!list.length) return;
+  const build = (nodes: OutlineItem[], parent: PDFRef): PDFRef[] => {
+    const refs = nodes.map(() => ctx.nextRef());
+    nodes.forEach((n, i) => {
+      const d = ctx.obj({ Title: PDFHexString.fromText(n.title), Parent: parent });
+      if (i > 0) d.set(PDFName.of("Prev"), refs[i - 1]);
+      if (i < refs.length - 1) d.set(PDFName.of("Next"), refs[i + 1]);
+      if (n.url) d.set(PDFName.of("A"), ctx.obj({ S: "URI", URI: PDFString.of(n.url) }));
+      else if (n.page && pageRefs.has(n.page)) d.set(PDFName.of("Dest"), ctx.obj([pageRefs.get(n.page)!, "XYZ", null, n.top ?? null, null]));
+      if (n.items.length) {
+        const kids = build(n.items, refs[i]);
+        d.set(PDFName.of("First"), kids[0]);
+        d.set(PDFName.of("Last"), kids[kids.length - 1]);
+        // Negative: shown collapsed.
+        d.set(PDFName.of("Count"), PDFNumber.of(-kids.length));
+      }
+      ctx.assign(refs[i], d);
+    });
+    return refs;
+  };
+  const root = ctx.nextRef();
+  const top = build(list, root);
+  ctx.assign(root, ctx.obj({ Type: "Outlines", First: top[0], Last: top[top.length - 1], Count: top.length }));
+  out.catalog.set(PDFName.of("Outlines"), root);
+}
+
+/** A copy of the source with new crop boxes ([x0, y0, x1, y1] in PDF user space) for some pages. */
+export async function croppedSource(src: Source, boxes: Map<number, [number, number, number, number]>): Promise<Uint8Array> {
+  let d: PDFDocument;
+  try {
+    d = await PDFDocument.load(await sourceBytes(src), { updateMetadata: false });
+  } catch (e) {
+    if ((e as Error)?.constructor?.name === "EncryptedPDFError" || /encrypt/i.test(String(e))) throw new EncryptedSourceError(src.name);
+    throw e;
+  }
+  const pages = d.getPages();
+  for (const [i, [x0, y0, x1, y1]] of boxes) pages[i].setCropBox(x0, y0, x1 - x0, y1 - y0);
+  return d.save({ useObjectStreams: true });
+}
+
+export interface BookletOptions {
+  /** a4 / a3: landscape sheets; double: two pages of the first page's size side by side. */
+  sheet: "a4" | "a3" | "double";
+  /** Bound on the right, for right-to-left documents. */
+  rtl: boolean;
+}
+
+/**
+ * Two pages per sheet side in booklet order: printed double-sided (flipping on the short edge)
+ * and folded in half, the sheets read in page order. Blank pages pad the count to a multiple of 4.
+ */
+export async function bookletPdf(bytes: Uint8Array, opt: BookletOptions): Promise<Uint8Array> {
+  const src = await PDFDocument.load(bytes, { updateMetadata: false });
+  const out = await PDFDocument.create();
+  const pages = src.getPages();
+  const emb = await out.embedPages(
+    pages,
+    pages.map((p) => {
+      const b = p.getCropBox();
+      return { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height };
+    }),
+  );
+  const rot = pages.map((p) => ((p.getRotation().angle % 360) + 360) % 360);
+  const size = (i: number) => (rot[i] % 180 ? [emb[i].height, emb[i].width] : [emb[i].width, emb[i].height]);
+  const [W, H] = opt.sheet === "a3" ? [1190.55, 841.89] : opt.sheet === "a4" ? [841.89, 595.28] : [2 * size(0)[0], size(0)[1]];
+  const place = (sheet: PDFPage, i: number, x0: number) => {
+    if (i >= pages.length) return;
+    const [dw, dh] = size(i);
+    const k = Math.min(W / 2 / dw, H / dh);
+    const w = dw * k;
+    const h = dh * k;
+    const x = x0 + (W / 2 - w) / 2;
+    const y = (H - h) / 2;
+    const e = emb[i];
+    // Embedded pages ignore /Rotate; turn the content as a viewer would (clockwise).
+    if (rot[i] === 90) sheet.drawPage(e, { x, y: y + h, xScale: k, yScale: k, rotate: degrees(-90) });
+    else if (rot[i] === 180) sheet.drawPage(e, { x: x + w, y: y + h, xScale: k, yScale: k, rotate: degrees(180) });
+    else if (rot[i] === 270) sheet.drawPage(e, { x: x + w, y, xScale: k, yScale: k, rotate: degrees(90) });
+    else sheet.drawPage(e, { x, y, xScale: k, yScale: k });
+  };
+  const n = Math.ceil(pages.length / 4) * 4;
+  for (let s = 0; s < n / 4; s++) {
+    // Outside of the sheet, then inside.
+    for (const [a, b] of [[n - 1 - 2 * s, 2 * s], [2 * s + 1, n - 2 - 2 * s]]) {
+      const sheet = out.addPage([W, H]);
+      const [left, right] = opt.rtl ? [b, a] : [a, b];
+      place(sheet, left, 0);
+      place(sheet, right, W / 2);
+    }
+  }
   return out.save({ useObjectStreams: true });
 }
 
@@ -314,6 +461,7 @@ class DrawContext {
   }
 
   async draw(page: PDFPage, ref: PageRef, o: Obj): Promise<void> {
+    if (o.type === "link") return; // added as annotations once all pages exist
     if (o.type === "note") {
       this.addNote(page, ref, o.x, o.y, o.w, o.h, o.text, o.color);
       return;

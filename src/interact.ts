@@ -1,5 +1,5 @@
 import type { DocSession } from "./doc";
-import type { InkObj, MarkKind, MarkObj, NoteObj, Obj, ShapeKind, ShapeObj, TextObj } from "./model";
+import type { InkObj, LinkObj, MarkKind, MarkObj, NoteObj, Obj, ShapeKind, ShapeObj, TextObj } from "./model";
 import { uid } from "./model";
 import type { PageView, Viewer } from "./viewer";
 import { editor, settings } from "./state";
@@ -11,8 +11,9 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 export interface InteractionHooks {
   editNote(o: NoteObj): void;
-  /** An area was selected with the table tool. */
-  tableRegion(pv: PageView, r: Rect): void;
+  editLink(o: LinkObj): void;
+  /** An area was selected with the table, crop or link tool. */
+  region(pv: PageView, r: Rect, tool: "table" | "crop" | "link"): void;
   contextMenu(o: Obj, x: number, y: number): void;
   toast(msg: string): void;
 }
@@ -75,6 +76,7 @@ export class Interaction {
       if (!o) return;
       if (o.type === "text") this.startEdit(o.id);
       else if (o.type === "note") this.hooks.editNote(o);
+      else if (o.type === "link") this.hooks.editLink(o);
     });
     objs.addEventListener("contextmenu", (e) => {
       const el = (e.target as HTMLElement).closest(".obj") as HTMLElement | null;
@@ -200,7 +202,7 @@ export class Interaction {
       d.addEventListener("pointerdown", (e) => this.startResize(pv, o.id, hx, hy, e));
       h.append(d);
     }
-    if (o.type !== "note" && o.type !== "mark") {
+    if (o.type !== "note" && o.type !== "mark" && o.type !== "link") {
       const r = document.createElement("div");
       r.className = "handle h-rot";
       r.addEventListener("pointerdown", (e) => this.startRotate(pv, o.id, e));
@@ -593,10 +595,10 @@ export class Interaction {
     previewBox.append(preview);
     L.objs.append(previewBox);
 
-    if (t === "table") {
+    if (t === "table" || t === "crop" || t === "link") {
       let p1 = p0;
       const box = document.createElement("div");
-      box.className = "table-select";
+      box.className = t === "crop" ? "table-select crop-select" : "table-select";
       previewBox.append(box);
       const draw = () => {
         const r = normRect(p0, p1);
@@ -612,7 +614,7 @@ export class Interaction {
         previewBox.remove();
         const r = normRect(p0, p1);
         editor.setTool("select");
-        if (r.w * s > 8 && r.h * s > 8) this.hooks.tableRegion(pv, r);
+        if (r.w * s > 8 && r.h * s > 8) this.hooks.region(pv, r, t);
       };
       capture.addEventListener("pointermove", move);
       capture.addEventListener("pointerup", up);

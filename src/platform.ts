@@ -26,6 +26,19 @@ export async function writePath(path: string, bytes: Uint8Array): Promise<void> 
   await tauriInvoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });
 }
 
+/** Folder for autosaved copies of unsaved documents (desktop only). */
+export function recoveryDir(): Promise<string> {
+  return tauriInvoke<string>("recovery_dir");
+}
+
+export function recoveryList(): Promise<string[]> {
+  return tauriInvoke<string[]>("recovery_list");
+}
+
+export function recoveryRemove(name: string): Promise<void> {
+  return tauriInvoke("recovery_remove", { name });
+}
+
 export async function startupFiles(): Promise<string[]> {
   if (!isTauri) return [];
   try {

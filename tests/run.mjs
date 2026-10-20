@@ -519,6 +519,134 @@ try {
   });
   check(fitsPixels[0] === fitsPixels[2] && fitsPixels[1] === fitsPixels[3], `page bitmap is not stretched (${fitsPixels.join(", ")})`);
 
+  console.log("Saved state");
+  // A fresh copy of the sample in its own tab.
+  const openSample = () => page.evaluate(async (bytes) => {
+    await window.laserPdf.openFiles([{ name: "fresh.pdf", path: null, bytes: new Uint8Array(bytes) }]);
+    return window.laserPdf.active.pages.map((p) => p.id);
+  }, Array.from(readFileSync(sample)));
+  const fresh = await openSample();
+  await page.waitForTimeout(300);
+  const dirty = () => page.evaluate(() => ({ doc: window.laserPdf.active.dirty, button: !!document.querySelector(".toolbar button.attention") }));
+  check(!(await dirty()).doc, "an opened file has nothing to save");
+  await page.evaluate((id) => {
+    const doc = window.laserPdf.active;
+    doc.change("objects", () => doc.objects.push({ id: "o-undo", page: id, type: "shape", shape: "rect", x: 100, y: 100, w: 50, h: 50, rot: 0, opacity: 1, stroke: "#ff0000", fill: null, width: 2 }));
+  }, fresh[0]);
+  check((await dirty()).doc, "a change makes it unsaved");
+  await page.keyboard.press("Control+z");
+  const undone = await dirty();
+  check(!undone.doc && !undone.button, "undoing every change leaves nothing to save");
+  await page.keyboard.press("Control+y");
+  check((await dirty()).doc, "redoing it makes it unsaved again");
+
+  console.log("Crop");
+  const modalPrimary = async () => {
+    await page.waitForSelector(".modal-back.show .modal-foot .primary");
+    await page.locator(".modal-back.show .modal-foot .primary").click();
+    await page.waitForTimeout(250);
+  };
+  void page.evaluate((id) => window.laserPdf.cropPages(window.laserPdf.active.page(id), { x: 50, y: 50, w: 300, h: 400 }), fresh[0]);
+  await page.waitForSelector(".modal-back.show");
+  check(/hidden|gizlenir/i.test(await page.locator(".modal-back.show .modal").textContent()), "the crop dialog says hidden content stays in the file");
+  await modalPrimary();
+  await page.waitForFunction(() => window.laserPdf.active.pages[0].w === 300);
+  const cropped = await page.evaluate(() => {
+    const doc = window.laserPdf.active;
+    return { p: doc.pages[0], other: doc.pages[1], obj: doc.obj("o-undo"), srcs: new Set(doc.pages.map((p) => p.src)).size };
+  });
+  check(cropped.p.h === 400 && cropped.p.vx === 50 && cropped.p.vy === 392, `the page shows the selected area (${cropped.p.vx}, ${cropped.p.vy}, ${cropped.p.w} × ${cropped.p.h})`);
+  check(cropped.other.w === 595 && cropped.srcs === 1, "other pages keep their size and stay in the same document");
+  check(cropped.obj.x === 50 && cropped.obj.y === 50, "objects stay where they were on the page");
+  const croppedFile = await PDFDocument.load(Uint8Array.from(await exportBytes()));
+  const cb = croppedFile.getPage(0).getCropBox();
+  check(cb.x === 50 && cb.y === 392 && cb.width === 300 && cb.height === 400 && croppedFile.getPage(1).getCropBox().width === 595, "the saved file has the crop box");
+  check(/Line 0 on page 1/.test((await pdfText(Uint8Array.from(await exportBytes())))[0]), "cropping keeps the page's text");
+  await page.keyboard.press("Control+z");
+  check(await page.evaluate(() => window.laserPdf.active.pages[0].w === 595 && window.laserPdf.active.obj("o-undo").x === 100), "undo restores the page and the object");
+
+  console.log("Links and bookmarks");
+  await page.evaluate((ids) => {
+    const doc = window.laserPdf.active;
+    doc.change("objects", () =>
+      doc.objects.push(
+        { id: "l-web", page: ids[0], type: "link", url: "https://example.org/x", x: 60, y: 60, w: 120, h: 20, rot: 0, opacity: 1 },
+        { id: "l-page", page: ids[0], type: "link", dest: ids[2], x: 60, y: 100, w: 120, h: 20, rot: 0, opacity: 1 },
+      ),
+    );
+  }, fresh);
+  // A link drawn with the tool asks for its target.
+  await page.evaluate(() => window.laserPdf.setTool("link"));
+  const lp = await page.locator(".page").first().boundingBox();
+  await page.mouse.move(lp.x + 300, lp.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(lp.x + 420, lp.y + 330, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForSelector(".modal-back.show .link-dialog");
+  await page.keyboard.type("not a url");
+  await page.locator(".modal-back.show .modal-foot .primary").click();
+  check(await page.locator(".modal-back.show input.invalid").count() === 1, "an address that cannot work keeps the link dialog open");
+  await page.locator(".modal-back.show input.invalid").fill("laserpdf.example");
+  await modalPrimary();
+  check(await page.evaluate(() => window.laserPdf.active.objects.some((o) => o.type === "link" && o.url === "https://laserpdf.example")), "a link drawn with the tool gets the typed address");
+  // Bookmarks: added from the sidebar, then nested and renamed through the model.
+  await page.locator(".side-tab").nth(1).click();
+  await page.locator(".outline-add").click();
+  await page.waitForSelector(".modal-back.show input");
+  await page.locator(".modal-back.show input").fill("Başlangıç");
+  await modalPrimary();
+  check((await page.locator(".outline-item").count()) === 1, "an added bookmark is listed");
+  await page.evaluate((ids) => {
+    const doc = window.laserPdf.active;
+    doc.change("meta", () => doc.outline[0].items.push({ id: "bm-x", title: "Üçüncü sayfa", page: ids[2], top: null, items: [] }));
+  }, fresh);
+  const linked = Uint8Array.from(await exportBytes());
+  const lpdf = await pdfjs.getDocument({ data: linked.slice() }).promise;
+  const annots = await (await lpdf.getPage(1)).getAnnotations();
+  const destPage = async (d) => lpdf.getPageIndex(Array.isArray(d) ? d[0] : (await lpdf.getDestination(d))[0]);
+  const pageLink = annots.find((a) => a.subtype === "Link" && a.dest);
+  check(annots.some((a) => a.url === "https://example.org/x") && annots.some((a) => /^https:\/\/laserpdf\.example\/?$/.test(a.url ?? "")), `web links are in the saved file (${JSON.stringify(annots.map((a) => a.url ?? a.unsafeUrl ?? a.dest))})`);
+  check(pageLink && (await destPage(pageLink.dest)) === 2, "a page link goes to its page");
+  const outline = await lpdf.getOutline();
+  check(outline?.length === 1 && outline[0].title === "Başlangıç" && outline[0].items[0]?.title === "Üçüncü sayfa", `bookmarks are saved with their nesting (${JSON.stringify(outline?.map((o) => o.title))})`);
+  check(outline && (await destPage(outline[0].dest)) === 0 && (await destPage(outline[0].items[0].dest)) === 2, "bookmarks go to their pages");
+  // Deleting the third page drops the bookmark and the link to it.
+  await page.evaluate((id) => {
+    const doc = window.laserPdf.active;
+    doc.change("pages", () => (doc.pages = doc.pages.filter((p) => p.id !== id)));
+  }, fresh[2]);
+  const pruned = await pdfjs.getDocument({ data: Uint8Array.from(await exportBytes()) }).promise;
+  const prunedOutline = await pruned.getOutline();
+  check(prunedOutline?.length === 1 && prunedOutline[0].items.length === 0 && !(await (await pruned.getPage(1)).getAnnotations()).some((a) => a.dest), "bookmarks and links to a deleted page are left out");
+  await page.locator(".side-tab").nth(0).click();
+
+  console.log("Stamps");
+  await page.locator(".toolbar button", { hasText: /Stamp|Damga/ }).first().click();
+  const stampMenu = await page.locator(".menu").textContent();
+  check(/\d{1,2}:\d{2}/.test(stampMenu) && /name|İsimli/i.test(stampMenu), "the stamp menu has date-and-time and named stamps");
+  await page.keyboard.press("Escape");
+
+  console.log("Booklet");
+  void page.evaluate(() => window.laserPdf.makeBooklet());
+  await modalPrimary();
+  await page.waitForFunction(() => /booklet|kitapcik/.test(window.laserPdf.active.name), null, { timeout: 10000 });
+  const booklet = Uint8Array.from(await exportBytes());
+  const bdoc = await PDFDocument.load(booklet);
+  const bsize = bdoc.getPage(0).getSize();
+  check(bdoc.getPageCount() === 2 && Math.round(bsize.width) === 842 && Math.round(bsize.height) === 595, `3 pages make one A4 sheet, both sides (${bdoc.getPageCount()} pages, ${Math.round(bsize.width)} × ${Math.round(bsize.height)})`);
+  // Pages 1, 2 and 4 are left. Outside of the sheet: [blank | 1]; inside: [2 | 4].
+  const halves = await (async () => {
+    const pdf = await pdfjs.getDocument({ data: booklet.slice() }).promise;
+    const out = [];
+    for (let i = 1; i <= 2; i++) {
+      const items = (await (await pdf.getPage(i)).getTextContent()).items.filter((it) => /^Line 0 on page \d/.test(it.str));
+      out.push(items.map((it) => `${it.transform[4] < 421 ? "L" : "R"}${it.str.at(-1)}`).sort().join(" "));
+    }
+    return out;
+  })();
+  check(halves[0] === "R1" && halves[1] === "L2 R4", `pages sit in booklet order (${JSON.stringify(halves)})`);
+  check(await page.evaluate(() => window.laserPdf.active.dirty), "the booklet opens as a new, unsaved document");
+
   console.log("Text recognition");
   // A "scan": text drawn on an A4 bitmap at the given dpi, opened as an image.
   const scan = (dpi) => page.evaluate(async (dpi) => {
@@ -555,6 +683,77 @@ try {
   await page.waitForSelector(".modal", { timeout: 10000 });
   check(/\d+ dpi/.test(await page.locator(".modal").textContent()), "a low-resolution scan gets a warning with its resolution instead of being recognized");
   await page.locator(".modal-foot .btn").first().click();
+
+  console.log("Recovery");
+  // The desktop layer, faked: files live in memory, keyed by path.
+  const fakeDesktop = (initial) => {
+    const files = new Map(initial.map(([k, v]) => [k, new Uint8Array(v)]));
+    const dir = "C:\\rec";
+    window.__files = files;
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      transformCallback: () => 0,
+      invoke: async (cmd, args, opts) => {
+        if (cmd === "recovery_dir") return dir;
+        if (cmd === "recovery_list") return [...files.keys()].map((k) => k.slice(dir.length + 1));
+        if (cmd === "recovery_remove") return void files.delete(dir + "\\" + args.name);
+        if (cmd === "write_file") return void files.set(decodeURIComponent(opts.headers.path), new Uint8Array(args));
+        if (cmd === "read_file") {
+          const b = files.get(args.path);
+          if (!b) throw new Error("missing " + args.path);
+          return b.slice().buffer;
+        }
+        if (cmd === "startup_files") return [];
+        return null;
+      },
+    };
+  };
+  const desk = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  desk.on("pageerror", (e) => errors.push("desktop: " + e.message));
+  await desk.addInitScript(fakeDesktop, []);
+  await desk.goto(url);
+  await desk.waitForSelector(".welcome-action.primary");
+  await desk.waitForFunction(() => window.laserPdf.recovery.enabled);
+  await desk.evaluate(async (bytes) => {
+    await window.laserPdf.openFiles([{ name: "crash.pdf", path: "C:\\docs\\crash.pdf", bytes: new Uint8Array(bytes) }]);
+    const doc = window.laserPdf.active;
+    doc.change("objects", () => doc.objects.push({ id: "o-rec", page: doc.pages[1].id, type: "link", url: "https://example.org/rec", x: 10, y: 10, w: 50, h: 20, rot: 0, opacity: 1 }));
+    await window.laserPdf.recovery.save(window.laserPdf.docs);
+  }, Array.from(readFileSync(sample)));
+  const left = await desk.evaluate(() => [...window.__files].map(([k, v]) => [k, Array.from(v)]));
+  check(left.some(([k]) => k.endsWith(".json")) && left.some(([k]) => k.endsWith(".pdf")), `unsaved work is written to the recovery folder (${left.map(([k]) => k.split("\\").pop().replace(/^doc\w+/, "…")).join(", ")})`);
+  // An unchanged document writes nothing new; a saved one removes its files.
+  const writes = await desk.evaluate(async () => {
+    const before = window.__files.size;
+    await window.laserPdf.recovery.save(window.laserPdf.docs);
+    return before === window.__files.size;
+  });
+  check(writes, "nothing is written again while the document is unchanged");
+  await desk.close();
+  // The app "crashed": a new start finds the files.
+  const again = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  again.on("pageerror", (e) => errors.push("desktop: " + e.message));
+  await again.addInitScript(fakeDesktop, left);
+  await again.goto(url);
+  await again.waitForSelector(".modal-back.show .recovery-list", { timeout: 10000 });
+  check(/crash\.pdf/.test(await again.locator(".recovery-list").textContent()), "the next start offers to recover the document");
+  await again.locator(".modal-back.show .modal-foot .primary").click();
+  await again.waitForFunction(() => window.laserPdf.active?.obj("o-rec"));
+  // Removing the old files follows the restore.
+  await again.waitForFunction(() => window.__files.size === 0, null, { timeout: 3000 }).catch(() => {});
+  const back = await again.evaluate(() => {
+    const doc = window.laserPdf.active;
+    return { dirty: doc.dirty, path: doc.path, pages: doc.pages.length, files: [...window.__files.keys()].length };
+  });
+  check(back.dirty && back.path === "C:\\docs\\crash.pdf" && back.pages === 4, "the recovered document has its changes, its path and is unsaved");
+  check(back.files === 0, "the recovered files are removed");
+  await again.evaluate(async () => {
+    await window.laserPdf.recovery.save(window.laserPdf.docs);
+    window.laserPdf.active.markSaved();
+    await window.laserPdf.recovery.save(window.laserPdf.docs);
+  });
+  check((await again.evaluate(() => window.__files.size)) === 0, "saving a document removes its recovery files");
+  await again.close();
 
   check(errors.length === 0, `no page errors${errors.length ? ": " + errors.join("; ") : ""}`);
 } catch (e) {

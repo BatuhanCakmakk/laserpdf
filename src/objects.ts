@@ -1,6 +1,7 @@
 import type { DocSession } from "./doc";
-import type { InkObj, MarkObj, NoteObj, Obj, ShapeObj, TextObj } from "./model";
+import type { InkObj, LinkObj, MarkObj, NoteObj, Obj, ShapeObj, TextObj } from "./model";
 import { cssFamily, LINE_HEIGHT, TEXT_PAD } from "./fonts";
+import { t } from "./i18n";
 
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -51,6 +52,9 @@ function renderText(o: TextObj, s: number, el: HTMLElement): void {
   c.className = "obj-text";
   c.textContent = o.text;
   applyTextStyle(c, o, s);
+  // Lines align within the whole box, as in the saved PDF (stamps are wider than their text).
+  c.style.minWidth = "100%";
+  c.style.boxSizing = "border-box";
   el.append(c);
   if (o.bg) el.style.background = o.bg;
   if (o.border) el.style.boxShadow = `inset 0 0 0 ${Math.max(1, 1.5 * s)}px ${o.border}`;
@@ -137,6 +141,13 @@ function renderNote(o: NoteObj, _s: number, el: HTMLElement): void {
   if (o.text) el.title = o.text;
 }
 
+/** Where a link goes, for labels and tooltips. */
+export function linkTarget(o: LinkObj, doc: DocSession): string {
+  if (o.url) return o.url;
+  const i = o.dest ? doc.pageIndex(o.dest) : -1;
+  return i >= 0 ? `${t("page")} ${i + 1}` : "?";
+}
+
 /** Creates the DOM element for an annotation object at the given zoom scale. */
 export function renderObj(o: Obj, s: number, doc: DocSession): HTMLElement {
   const el = document.createElement("div");
@@ -168,6 +179,9 @@ export function renderObj(o: Obj, s: number, doc: DocSession): HTMLElement {
       break;
     case "note":
       renderNote(o, s, el);
+      break;
+    case "link":
+      el.title = linkTarget(o, doc);
       break;
   }
   return el;

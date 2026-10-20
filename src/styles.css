@@ -856,6 +856,16 @@ li.open > .outline-item .outline-toggle {
   transform: rotate(90deg);
 }
 
+.outline-add {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.outline-item.missing {
+  opacity: 0.5;
+}
+
 .empty-note {
   color: var(--muted);
   font-size: 12.5px;
@@ -1078,6 +1088,13 @@ li.open > .outline-item .outline-toggle {
   font-weight: 650;
 }
 
+/* Everything outside the area to keep is dimmed. */
+.crop-select {
+  border-color: var(--select);
+  background: transparent;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.35);
+}
+
 .whiteout-preview {
   outline: 1px dashed var(--select);
   box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.04);
@@ -1169,6 +1186,12 @@ li.open > .outline-item .outline-toggle {
   position: absolute;
   left: 0;
   right: 0;
+}
+
+.obj-link {
+  border: 1.5px dashed rgb(47 107 255 / 0.7);
+  background: rgb(47 107 255 / 0.08);
+  border-radius: 2px;
 }
 
 .obj-note .note-icon {
@@ -1921,6 +1944,34 @@ kbd {
   min-height: 130px;
 }
 
+.input.invalid {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(224 52 79 / 0.18);
+}
+
+.link-dialog {
+  display: grid;
+  gap: 12px;
+  min-width: 340px;
+}
+
+.recovery-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.recovery-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
 /* ------------------------------------------------------------ menus/pops */
 
 .menu {
@@ -2483,4 +2534,8 @@ kbd {
 
 #app.night .page {
   background: #1a1a1a;
+}
+
+.modal-text + .form-grid {
+  margin-top: 12px;
 }

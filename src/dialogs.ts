@@ -1,4 +1,4 @@
-import { t, type Key } from "./i18n";
+import { t, locale, type Key } from "./i18n";
 import { h, modal } from "./ui";
 import { icon } from "./icons";
 import type { DocSession } from "./doc";
@@ -504,6 +504,140 @@ export async function compressDialog(): Promise<{ dpi: number; quality: number }
   return q.value === "low" ? { dpi: 96, quality: 0.55 } : q.value === "high" ? { dpi: 200, quality: 0.85 } : { dpi: 144, quality: 0.72 };
 }
 
+// ------------------------------------------------------------------- stamps
+
+const STAMP_NAME_KEY = "laserpdf.stampName";
+
+/** Date and time as shown on stamps. */
+export function stampDateTime(date: boolean, time: boolean): string {
+  const now = new Date();
+  return [
+    date ? now.toLocaleDateString(locale()) : "",
+    time ? now.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" }) : "",
+  ].filter(Boolean).join(" ");
+}
+
+/** A stamp with a name and, optionally, the date and time. Resolves to its lines and colour. */
+export async function namedStampDialog(): Promise<{ text: string; color: string } | null> {
+  const presets: Key[] = ["stampApproved", "stampReviewed", "stampReceived", "stampFinal", "stampDraft", "stampConfidential", "stampRejected"];
+  const text = h("input", { class: "input", value: t("stampApproved"), list: "stamp-texts" });
+  const texts = h("datalist", { id: "stamp-texts" }, ...presets.map((k) => h("option", { value: t(k) })));
+  let saved = "";
+  try {
+    saved = localStorage.getItem(STAMP_NAME_KEY) ?? "";
+  } catch {
+    /* storage unavailable */
+  }
+  const name = h("input", { class: "input", value: saved, placeholder: t("typeYourName") });
+  const date = h("input", { type: "checkbox", checked: true });
+  const time = h("input", { type: "checkbox", checked: true });
+  const color = h("input", { type: "color", value: "#1f8a4c", class: "color-input wide" });
+  const body = h("div", { class: "form-grid" },
+    h("div", { class: "span2" }, field(t("stampText"), text), texts),
+    h("div", { class: "span2" }, field(t("stampName"), name)),
+    h("label", { class: "check" }, date, h("span", {}, t("stampWithDate"))),
+    h("label", { class: "check" }, time, h("span", {}, t("stampWithTime"))),
+    field(t("color"), color),
+  );
+  const ok = await modal({ title: t("stampNamed").replace(/…$/, ""), body, buttons: [{ label: t("cancel"), value: false }, { label: t("place"), value: true, primary: true }], cancelValue: false });
+  if (!ok) return null;
+  try {
+    localStorage.setItem(STAMP_NAME_KEY, name.value.trim());
+  } catch {
+    /* storage unavailable */
+  }
+  const lines = [text.value.trim(), name.value.trim(), stampDateTime(date.checked, time.checked)].filter(Boolean);
+  return lines.length ? { text: lines.join("\n"), color: color.value } : null;
+}
+
+// -------------------------------------------------------------------- links
+
+/** Asks where a link goes: a web address, or a page (1-based) of the document. */
+export async function linkDialog(current: { url?: string; page?: number }, pageCount: number): Promise<{ url: string } | { page: number } | null> {
+  let kind: "url" | "page" = current.page ? "page" : "url";
+  const url = h("input", { class: "input", value: current.url ?? "", placeholder: "https://", spellcheck: false });
+  const page = num(current.page ?? 1, 1, pageCount);
+  const urlField = field(t("linkWeb"), url);
+  const pageField = field(t("linkPage"), page);
+  const show = () => {
+    urlField.style.display = kind === "url" ? "" : "none";
+    pageField.style.display = kind === "page" ? "" : "none";
+  };
+  const seg = h("div", { class: "seg" },
+    ...(["url", "page"] as const).map((k) => {
+      const b = h("button", { class: `seg-btn ${k === kind ? "active" : ""}` }, t(k === "url" ? "linkWeb" : "linkPage"));
+      b.addEventListener("click", () => {
+        kind = k;
+        seg.querySelectorAll(".seg-btn").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        show();
+        (k === "url" ? url : page).focus();
+      });
+      return b;
+    }),
+  );
+  show();
+  setTimeout(() => (kind === "url" ? url : page).focus(), 50);
+  const body = h("div", { class: "link-dialog" }, seg, urlField, pageField);
+  const pageOk = () => {
+    const n = Number(page.value);
+    return Number.isInteger(n) && n >= 1 && n <= pageCount;
+  };
+  const ok = await modal({
+    title: t("tool_link"),
+    body,
+    buttons: [{ label: t("cancel"), value: false }, { label: t("apply"), value: true, primary: true }],
+    cancelValue: false,
+    // An address or page that cannot work keeps the dialog open.
+    validate: () => {
+      const input = kind === "url" ? url : page;
+      const valid = kind === "url" ? normalizeUrl(url.value) !== null : pageOk();
+      input.classList.toggle("invalid", !valid);
+      if (!valid) input.focus();
+      return valid;
+    },
+  });
+  if (!ok) return null;
+  if (kind === "page") {
+    const n = Math.round(Number(page.value));
+    return n >= 1 && n <= pageCount ? { page: n } : null;
+  }
+  return normalizeUrl(url.value);
+}
+
+/** A web or e-mail address with its scheme; null for anything else. */
+export function normalizeUrl(v: string): { url: string } | null {
+  let u = v.trim();
+  if (!u) return null;
+  if (/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(u)) u = "mailto:" + u;
+  else if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = "https://" + u;
+  return /^(https?:\/\/[^\s]+|mailto:[^\s]+)$/i.test(u) ? { url: u } : null;
+}
+
+// --------------------------------------------------------------- crop, booklet
+
+/** Which pages a crop applies to. */
+export async function cropDialog(selectedCount: number): Promise<"this" | "all" | "sel" | null> {
+  const range = select<"this" | "all" | "sel">("this", [
+    ["this", t("cropThis")], ["all", t("allPages")],
+    ...(selectedCount > 1 ? [["sel", `${t("selectedPages")} (${selectedCount})`] as ["sel", string]] : []),
+  ]);
+  const body = h("div", {}, h("p", { class: "modal-text" }, t("cropInfo")), field(t("pageRange"), range));
+  const ok = await modal({ title: t("crop"), body, buttons: [{ label: t("cancel"), value: false }, { label: t("tool_crop"), value: true, primary: true }], cancelValue: false });
+  return ok ? (range.value as "this" | "all" | "sel") : null;
+}
+
+export async function bookletDialog(): Promise<{ sheet: "a4" | "a3" | "double"; rtl: boolean } | null> {
+  const sheet = select<"a4" | "a3" | "double">("a4", [["a4", t("bookletA4")], ["a3", t("bookletA3")], ["double", t("bookletDouble")]]);
+  const bind = select<"left" | "right">("left", [["left", t("bindLeft")], ["right", t("bindRight")]]);
+  const body = h("div", {},
+    h("p", { class: "modal-text" }, t("bookletInfo")),
+    h("div", { class: "form-grid" }, field(t("bookletSheet"), sheet), field(t("bookletBinding"), bind)),
+  );
+  const ok = await modal({ title: t("booklet").replace(/…$/, ""), body, buttons: [{ label: t("cancel"), value: false }, { label: t("apply"), value: true, primary: true }], cancelValue: false });
+  return ok ? { sheet: sheet.value as "a4" | "a3" | "double", rtl: bind.value === "right" } : null;
+}
+
 // ------------------------------------------------------------ shortcuts etc.
 
 export function shortcutsDialog(): void {
@@ -531,6 +665,7 @@ export function aboutDialog(version: string): void {
       h("h3", {}, "LaserPDF"),
       h("p", {}, t("aboutText")),
       h("p", { class: "muted" }, `${t("version")} ${version}`),
+      h("p", { class: "muted about-copy" }, "© 2026 Batuhan Çakmak"),
     ),
     buttons: [{ label: t("ok"), value: true, primary: true }],
     cancelValue: false,

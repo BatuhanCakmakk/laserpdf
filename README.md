@@ -34,26 +34,31 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 - **Add text** with font, size, bold/italic, alignment, color, background and border
 - **Images:** PNG, JPG, WebP, GIF, BMP, or paste from the clipboard (Ctrl+V)
 - **Signatures:** draw, type your name or use an image; signatures are saved for next time
-- **Stamps:** APPROVED, DRAFT, CONFIDENTIAL, date stamp or your own text
+- **Stamps:** APPROVED, DRAFT, CONFIDENTIAL, date or date and time, your own text, or a stamp with your name and the date and time
 - **Markup:** highlight, underline and strike out text; pen and highlighter
 - **Shapes:** rectangle, ellipse, line, arrow (color, fill, width, opacity)
 - **Redact:** draw a black or white box; the text and links under it are deleted from the file when you save. If something under it cannot be removed (an image, a scanned page, a form field), LaserPDF offers to turn that page into an image
+- **Links:** draw an area that opens a web address or goes to a page of the document
 - **Sticky notes** saved as real PDF note annotations
 - **Form filling:** text fields, checkboxes and drop-down lists
 - Every object can be moved, resized, rotated, duplicated, copied and pasted
 - **Annotations** panel listing every comment page by page
-- Undo / redo (150 steps)
+- Undo / redo (150 steps); undoing every change leaves nothing to save
+- **Recovery:** unsaved work is kept every 30 seconds and offered back if LaserPDF closes unexpectedly
 
 ### Pages
 - Reorder pages by drag and drop, in the sidebar or the full-screen **Organize pages** view
 - Rotate, delete, duplicate, insert blank pages
 - Insert pages from other PDFs or images; drop files onto the sidebar
 - Extract selected pages to a new PDF, split a document into files of N pages
+- **Crop** pages to a selected area (this page, all pages or the selected ones); the content outside is hidden, not deleted
+- **Bookmarks:** add, rename, reorder, nest and delete
 - Flatten a page (turn it into an image for **permanent redaction**)
 
 ### Tools
 - Merge PDFs, create a PDF from images, new blank document
 - Page numbers, header/footer (e.g. `CONFIDENTIAL · Page {n} / {total}`) and watermarks
+- **Booklet:** two pages per sheet side in folding order, for double-sided printing
 - Document properties (title, author, subject, keywords)
 - **Remove hidden information** on save: creator program, dates, XMP data, comment authors and the location/camera data of photos. Location data of inserted photos is always removed
 - **Text recognition (OCR):** recognizes scanned pages and adds an invisible text layer, so the text can be searched, selected and copied. English and Turkish, fully offline (Tesseract). Suggested when a scanned document is opened; scans below 150 dpi get an explanation instead of a long, failing run
@@ -177,6 +182,7 @@ src/
   search.ts     Search
   dialogs.ts    Signature, page numbers, watermark, properties and other dialogs
   platform.ts   Desktop (Tauri) and browser file access
+  recovery.ts   Autosave of unsaved work and recovery after a crash
 src-tauri/      Rust side: window, file access, file associations, MCP stdio bridge
 ```
 

@@ -9,7 +9,8 @@ import {
   PanelLeft, Bookmark, Download, FileImage, Merge, Scissors, Hash, Droplets, Bold, Italic, AlignLeft,
   AlignCenter, AlignRight, PaintBucket, SquareDashed, MoveHorizontal, Maximize, Upload, FilePlus2,
   FileOutput, Minimize2, Images, CopyPlus, Wrench, ArrowUpDown, Lock, PenLine, CaseSensitive, Clock,
-  Monitor, ListTree, Layers, ScanText, FileSpreadsheet,
+  Monitor, ListTree, Layers, ScanText, FileSpreadsheet, Crop, Link, BookOpen, BookmarkPlus, ArrowUp, ArrowDown,
+  ListIndentIncrease, ListIndentDecrease, UserCheck, History,
 } from "lucide";
 
 const ICONS: Record<string, IconNode> = {
@@ -28,6 +29,8 @@ const ICONS: Record<string, IconNode> = {
   upload: Upload, blankPage: FilePlus2, extract: FileOutput, compress: Minimize2, images: Images,
   duplicate: CopyPlus, tools: Wrench, reorder: ArrowUpDown, lock: Lock, pen: PenLine, font: CaseSensitive,
   clock: Clock, monitor: Monitor, outline: ListTree, layers: Layers, ocr: ScanText, sheet: FileSpreadsheet,
+  crop: Crop, link: Link, booklet: BookOpen, bookmarkPlus: BookmarkPlus, arrowUp: ArrowUp, arrowDown: ArrowDown,
+  indent: ListIndentIncrease, outdent: ListIndentDecrease, userStamp: UserCheck, history: History,
 };
 
 export function icon(name: string, size = 18): SVGElement {
