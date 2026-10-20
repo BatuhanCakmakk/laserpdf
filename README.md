@@ -26,7 +26,8 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 - Zoom (Ctrl + wheel, fit width or page), page navigation, thumbnails and bookmarks panel
 - Search (Turkish İ/ı aware), select and copy text
 - Links (internal links jump to the page, external links open in the browser)
-- Tabs for several documents, recent files, presentation mode (F5), night reading mode
+- Tabs for several documents, recent files, presentation mode (F5)
+- Reading mode (Ctrl+H): only the pages and a small bar, a comfortable page width, normal, sepia or night page tone, full screen
 - Opening another PDF while LaserPDF is running opens it in a new tab
 
 ### Editing
@@ -58,7 +59,7 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 ### Tools
 - Merge PDFs, create a PDF from images, new blank document
 - Page numbers, header/footer (e.g. `CONFIDENTIAL · Page {n} / {total}`) and watermarks
-- **Booklet:** two pages per sheet side in folding order, for double-sided printing
+- **Booklet:** two pages per sheet side in folding order, for double-sided printing (undo brings the pages back)
 - Document properties (title, author, subject, keywords)
 - **Remove hidden information** on save: creator program, dates, XMP data, comment authors and the location/camera data of photos. Location data of inserted photos is always removed
 - **Text recognition (OCR):** recognizes scanned pages and adds an invisible text layer, so the text can be searched, selected and copied. English and Turkish, fully offline (Tesseract). Suggested when a scanned document is opened; scans below 150 dpi get an explanation instead of a long, failing run
@@ -152,6 +153,7 @@ LaserPDF works offline. It has no account, no ads, no analytics and makes no net
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl + / Ctrl − / Ctrl+0 | Zoom in / Zoom out / 100% |
 | Ctrl+Tab, Ctrl+W | Switch tabs, close tab |
+| Ctrl+H / Esc | Start / leave reading mode |
 | F5 / Esc | Start / leave presentation mode |
 | Space (hold) | Temporary hand tool |
 | V H E T | Select, Hand, Edit text, Add text |

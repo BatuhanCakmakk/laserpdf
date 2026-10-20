@@ -140,7 +140,7 @@ try {
   await (await fc).setFiles(sample);
   await page.waitForSelector(".page-raster");
   check((await page.locator(".page").count()) === 4, "4 pages shown");
-  check((await page.locator(".toolbar .tb-doc-tools button:not(:disabled)").count()) === 5, "page tools are on the toolbar");
+  check((await page.locator(".toolbar .tb-doc-tools button:not(:disabled)").count()) === 7, "page tools are on the toolbar");
   const fits = () => page.evaluate(() => {
     const tb = document.querySelector(".toolbar");
     return { fits: tb.scrollWidth <= tb.clientWidth + 1, compact: tb.classList.contains("compact") };
@@ -626,10 +626,26 @@ try {
   check(/\d{1,2}:\d{2}/.test(stampMenu) && /name|İsimli/i.test(stampMenu), "the stamp menu has date-and-time and named stamps");
   await page.keyboard.press("Escape");
 
+  console.log("Reading mode");
+  const docTools = await page.evaluate(() => Array.from(document.querySelectorAll(".tb-doc-tools .tb-label"), (e) => e.textContent));
+  check(docTools.includes("OCR") && docTools.some((x) => /^(Table|Tablo)$/.test(x)), `text recognition and table export are on the toolbar (${docTools.join(", ")})`);
+  await page.locator(".viewer").click({ position: { x: 5, y: 5 } });
+  await page.evaluate(() => window.laserPdf.viewer.scrollToPage(0));
+  await page.keyboard.press("Control+h");
+  check(await page.evaluate(() => document.getElementById("app").classList.contains("reading") && getComputedStyle(document.querySelector(".toolbar")).display === "none" && getComputedStyle(document.querySelector(".reading-bar")).display === "flex"), "Ctrl+H hides the toolbars and shows the reading bar");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => window.laserPdf.viewer.currentIndex === 1, null, { timeout: 5000 });
+  check(/^2 \/ \d+$/.test(await page.locator(".reading-page").textContent()), "the arrow keys turn pages and the bar shows the page");
+  await page.keyboard.press("t");
+  check(await page.evaluate(() => document.querySelector(".stage").dataset.tool === "select"), "tool keys do nothing while reading");
+  await page.keyboard.press("Escape");
+  check(await page.evaluate(() => !document.getElementById("app").classList.contains("reading")), "Esc leaves reading mode");
+
   console.log("Booklet");
+  const unbound = await page.evaluate(() => ({ pages: window.laserPdf.active.pages.map((p) => p.id), objects: window.laserPdf.active.objects.length }));
   void page.evaluate(() => window.laserPdf.makeBooklet());
   await modalPrimary();
-  await page.waitForFunction(() => /booklet|kitapcik/.test(window.laserPdf.active.name), null, { timeout: 10000 });
+  await page.waitForFunction((n) => window.laserPdf.active.pages.length !== n, unbound.pages.length, { timeout: 10000 });
   const booklet = Uint8Array.from(await exportBytes());
   const bdoc = await PDFDocument.load(booklet);
   const bsize = bdoc.getPage(0).getSize();
@@ -645,7 +661,10 @@ try {
     return out;
   })();
   check(halves[0] === "R1" && halves[1] === "L2 R4", `pages sit in booklet order (${JSON.stringify(halves)})`);
-  check(await page.evaluate(() => window.laserPdf.active.dirty), "the booklet opens as a new, unsaved document");
+  check(await page.evaluate(() => window.laserPdf.active.dirty && window.laserPdf.active.canUndo && !window.laserPdf.active.objects.length), "the booklet replaces the pages of the document");
+  await page.evaluate(() => window.laserPdf.undo());
+  const rebound = await page.evaluate(() => ({ pages: window.laserPdf.active.pages.map((p) => p.id), objects: window.laserPdf.active.objects.length }));
+  check(JSON.stringify(rebound) === JSON.stringify(unbound), "undo brings back the pages and annotations from before the booklet");
 
   console.log("Text recognition");
   // A "scan": text drawn on an A4 bitmap at the given dpi, opened as an image.

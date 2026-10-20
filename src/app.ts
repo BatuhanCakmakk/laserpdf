@@ -31,7 +31,7 @@ import { Recovery } from "./recovery";
 import { PasswordCancelled, getTextItems } from "./engine";
 import { ensureFonts } from "./fonts";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 interface ToolDef {
@@ -59,6 +59,9 @@ const SHAPES: ToolDef[] = [
   { tool: "line", icon: "line", key: "L" },
   { tool: "arrow", icon: "arrow", key: "A" },
 ];
+/** Page width in reading mode when fitting the width: lines stay short enough to read comfortably. */
+const READING_WIDTH = 1000;
+
 const TOOL_KEYS: Record<string, Tool> = {
   v: "select", h: "hand", e: "edittext", t: "text", m: "highlight", u: "underline", k: "strike",
   p: "draw", i: "highlighter", r: "rect", o: "ellipse", l: "line", a: "arrow", w: "whiteout", n: "note",
@@ -111,6 +114,12 @@ export class App {
   private lastShape: Tool = "rect";
   private lastMarkup: Tool = "highlight";
   private recovery = new Recovery();
+  private readingBar!: HTMLDivElement;
+  private readingPage!: HTMLSpanElement;
+  private readingZoom!: HTMLSpanElement;
+  private readingFullBtn!: HTMLButtonElement;
+  private readingFull = false;
+  private readingTimer = 0;
 
   async init(): Promise<void> {
     document.documentElement.lang = locale();
@@ -119,6 +128,7 @@ export class App {
     try {
       if (localStorage.getItem("laserpdf.sidebar") === "0") this.root.classList.add("no-sidebar");
       if (localStorage.getItem("laserpdf.night") === "1") this.root.classList.add("night");
+      else if (localStorage.getItem("laserpdf.sepia") === "1") this.root.classList.add("sepia");
     } catch {
       /* ignore */
     }
@@ -142,6 +152,7 @@ export class App {
       onCurrentPage: (i) => this.onCurrentPage(i),
       onScale: (s) => {
         this.zoomLabel.textContent = Math.round(s * 100) + "%";
+        this.updateReadingBar();
         this.search?.repaint();
       },
       wantsTextLayer: () => editor.tool === "select" || editor.tool === "highlight" || editor.tool === "underline" || editor.tool === "strike",
@@ -160,6 +171,7 @@ export class App {
     this.search = new SearchBar(this.viewer, this.interaction);
     this.stageEl.append(this.search.el);
     this.buildToolbar();
+    this.buildReadingBar();
     this.buildSidebar();
     this.buildOrganizer();
     this.buildWelcome();
@@ -173,6 +185,7 @@ export class App {
       const pageEl = t.closest<HTMLElement>(".page");
       if (!pageEl?.dataset.page) return;
       e.preventDefault();
+      if (this.reading) return;
       this.pageMenu([pageEl.dataset.page], e.clientX, e.clientY);
     });
     editor.on(() => {
@@ -426,6 +439,8 @@ export class App {
     const whiteout = this.toolBtn({ tool: "whiteout", icon: "whiteout", key: "W" });
     const note = this.toolBtn({ tool: "note", icon: "note", key: "N" });
 
+    const tableBtn = this.btn("xlsx", t("tableToExcel"), () => this.setTool("table"), undefined, t("tb_table"));
+    this.toolButtons.set("table", tableBtn);
     // Frequent page tools, also listed in the More menu.
     const docTools = h("div", { class: "tb-group tb-doc-tools" },
       this.btn("grid", t("organize"), () => this.openOrganizer(), undefined, t("tb_pages")),
@@ -433,6 +448,8 @@ export class App {
       this.btn("split", t("splitDoc"), () => this.splitDocument(), undefined, t("tb_split")),
       this.btn("compress", t("compress"), () => this.compress(), undefined, t("tb_compress")),
       this.btn("hash", t("pageNumbers"), () => this.active && pageNumbersDialog(this.active, this.grid.selected(), (o) => this.interaction.measureText(o)), undefined, t("tb_pageNumbers")),
+      this.btn("ocr", t("ocr"), () => this.active && this.recognizeText(this.active.pages.map((p) => p.id)), undefined, t("tb_ocr")),
+      tableBtn,
     );
 
     // Navigation & zoom
@@ -466,6 +483,7 @@ export class App {
     );
     const searchBtn = this.btn("search", t("search"), () => this.search.open(), `${MOD}+F`, t("tb_search"));
     const more = this.btn("more", t("more"), () => this.moreMenu(more), undefined, t("tb_more"));
+    const read = this.btn("reading", t("readingMode"), () => this.toggleReading(true), `${MOD}+H`, t("tb_reading"));
 
     const sideToggle = this.btn("panel", t("toggleSidebar"), () => this.toggleSidebar(), undefined, t("tb_sidebar"));
     const group = (...els: HTMLElement[]) => h("div", { class: "tb-group" }, ...els);
@@ -479,7 +497,7 @@ export class App {
       h("div", { class: "tb-spacer" }),
       group(prev, h("div", { class: "page-nav" }, this.pageInput, this.pageTotal), next),
       group(zoomOut, this.zoomLabel, zoomIn),
-      group(searchBtn, more),
+      group(read, searchBtn, more),
     );
     this.updateToolbar();
     this.fitToolbar();
@@ -826,6 +844,116 @@ export class App {
         ),
       ),
     );
+  }
+
+  private get reading(): boolean {
+    return this.root.classList.contains("reading");
+  }
+
+  /** Reading mode: only the pages and a small bar; annotations cannot be changed. */
+  private toggleReading(on = !this.reading): void {
+    if (on === this.reading || (on && !this.active)) return;
+    if (on) {
+      if (this.root.classList.contains("presenting")) this.togglePresentation(false);
+      if (this.organizerEl.classList.contains("open")) this.closeOrganizer();
+      this.setTool("select");
+      editor.select(null);
+    } else if (this.readingFull) this.setReadingFull(false);
+    this.root.classList.toggle("reading", on);
+    this.viewer.maxFitWidth = on ? READING_WIDTH : Infinity;
+    requestAnimationFrame(() => this.viewer.refit());
+    if (on) {
+      this.updateReadingBar();
+      this.wakeReadingBar();
+    }
+    this.viewer.el.focus({ preventScroll: true });
+  }
+
+  private buildReadingBar(): void {
+    const b = (name: string, label: string, onClick: () => void, shortcut?: string) => {
+      const x = h("button", { class: "icon-btn", title: tooltipText(label, shortcut), "aria-label": label }, icon(name));
+      x.addEventListener("click", onClick);
+      return x;
+    };
+    const sep = () => h("span", { class: "reading-sep" });
+    this.readingPage = h("span", { class: "reading-page" });
+    this.readingZoom = h("span", { class: "reading-zoom" });
+    const tones = ["normal", "sepia", "night"] as const;
+    const toneKey = { normal: "toneNormal", sepia: "toneSepia", night: "toneNight" } as const;
+    const tone: HTMLButtonElement = b("palette", t("pageTone"), () =>
+      showMenu(tones.map((k) => ({ label: t(toneKey[k]), checked: this.tone === k, action: () => this.setTone(k) })), 0, 0, tone),
+    );
+    this.readingFullBtn = b("expand", t("fullscreen"), () => this.setReadingFull(!this.readingFull));
+    this.readingBar = h("div", { class: "reading-bar", role: "toolbar", "aria-label": t("readingMode") },
+      b("left", t("prevPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex - 1), "←"),
+      this.readingPage,
+      b("right", t("nextPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex + 1), "→"),
+      sep(),
+      b("zoomOut", t("zoomOut"), () => this.zoomStep(-1), `${MOD}+−`),
+      this.readingZoom,
+      b("zoomIn", t("zoomIn"), () => this.zoomStep(1), `${MOD}++`),
+      b("fitWidth", t("fitWidth"), () => this.viewer.setFit("width")),
+      b("fitPage", t("fitPage"), () => this.viewer.setFit("page")),
+      sep(),
+      tone,
+      this.readingFullBtn,
+      b("x", t("readingExit"), () => this.toggleReading(false), "Esc"),
+    );
+    this.stageEl.append(this.readingBar);
+    this.stageEl.addEventListener("pointermove", () => this.reading && this.wakeReadingBar());
+    // Links drawn in LaserPDF are followed instead of selected.
+    this.viewer.el.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (!this.reading || e.button !== 0) return;
+        const el = (e.target as HTMLElement).closest<HTMLElement>(".obj-link");
+        const o = el && this.active?.obj(el.dataset.id!);
+        if (o?.type !== "link") return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (o.url) void platform.openUrl(o.url);
+        else if (o.dest) this.goToPage(this.active!.pageIndex(o.dest));
+      },
+      true,
+    );
+  }
+
+  private updateReadingBar(): void {
+    if (!this.readingPage || !this.reading) return;
+    const n = this.active?.pages.length ?? 0;
+    this.readingPage.textContent = `${Math.min(this.viewer.currentIndex + 1, n)} / ${n}`;
+    this.readingZoom.textContent = Math.round(this.viewer.scale * 100) + "%";
+  }
+
+  /** Shows the reading bar; it fades out again when the mouse rests. */
+  private wakeReadingBar(): void {
+    this.readingBar.classList.remove("idle");
+    clearTimeout(this.readingTimer);
+    this.readingTimer = window.setTimeout(() => this.readingBar.classList.add("idle"), 2500);
+  }
+
+  private setReadingFull(on: boolean): void {
+    this.readingFull = on;
+    void platform.setFullscreen(on);
+    const label = t(on ? "exitFullscreen" : "fullscreen");
+    this.readingFullBtn.replaceChildren(icon(on ? "shrink" : "expand"));
+    this.readingFullBtn.title = label;
+    this.readingFullBtn.setAttribute("aria-label", label);
+  }
+
+  private get tone(): "normal" | "sepia" | "night" {
+    return this.root.classList.contains("night") ? "night" : this.root.classList.contains("sepia") ? "sepia" : "normal";
+  }
+
+  private setTone(tone: "normal" | "sepia" | "night"): void {
+    this.root.classList.toggle("night", tone === "night");
+    this.root.classList.toggle("sepia", tone === "sepia");
+    try {
+      localStorage.setItem("laserpdf.night", tone === "night" ? "1" : "0");
+      localStorage.setItem("laserpdf.sepia", tone === "sepia" ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
   }
 
   private togglePresentation(on = !this.root.classList.contains("presenting")): void {
@@ -1204,7 +1332,10 @@ export class App {
     this.updateToolbar();
     this.buildPropbar();
     this.updateChrome();
-    if (!doc) this.buildWelcome();
+    if (!doc) {
+      this.toggleReading(false);
+      this.buildWelcome();
+    }
   }
 
   private updateChrome(): void {
@@ -1216,6 +1347,7 @@ export class App {
       this.pageTotal.textContent = `/ ${doc.pages.length}`;
       this.pageInput.value = String(this.viewer.currentIndex + 1);
       this.saveBtn.classList.toggle("attention", doc.dirty);
+      this.updateReadingBar();
     } else {
       this.pageTotal.textContent = "/ 0";
       this.pageInput.value = "";
@@ -1226,6 +1358,7 @@ export class App {
   private onCurrentPage(i: number): void {
     if (document.activeElement !== this.pageInput) this.pageInput.value = String(i + 1);
     this.grid?.setCurrent(i);
+    this.updateReadingBar();
   }
 
   private async confirmClose(doc: DocSession): Promise<boolean> {
@@ -1638,7 +1771,7 @@ export class App {
     }
   }
 
-  /** Makes a booklet of the document and opens it in a new tab. */
+  /** Rearranges the document into a booklet; one undo step brings the pages back. */
   private async makeBooklet(): Promise<void> {
     const doc = this.active;
     if (!doc) return;
@@ -1649,10 +1782,17 @@ export class App {
       const bytes = await this.buildBytes(doc);
       if (!bytes) return;
       const { bookletPdf } = await exporter();
-      const out = await bookletPdf(bytes, opts);
-      const booklet = await DocSession.fromBytes(out, doc.name.replace(/\.pdf$/i, "") + `-${t("bookletFile")}.pdf`, null);
-      booklet.markNew();
-      this.addDoc(booklet);
+      const src = await doc.addSource(await bookletPdf(bytes, opts), doc.name);
+      const pages = await doc.pagesFromSource(src);
+      // Annotations and links are part of the booklet pages now; it has no bookmarks.
+      doc.change("pages", () => {
+        doc.pages = pages;
+        doc.objects = [];
+        doc.outline = [];
+      });
+      editor.select(null);
+      doc.emit("objects");
+      this.viewer.scrollToPage(0);
       toast(t("bookletDone"), "success", 7000);
     } catch (e) {
       toast(t("saveFailed", { err: String(e) }), "error");
@@ -1892,21 +2032,11 @@ export class App {
         { label: t("compress"), icon: "compress", action: () => this.compress() },
         { label: t("booklet"), icon: "booklet", action: () => this.makeBooklet() },
         { label: t("ocr"), icon: "ocr", action: () => this.recognizeText(doc.pages.map((p) => p.id)) },
-        { label: t("tableToExcel"), icon: "sheet", action: () => editor.setTool("table") },
+        { label: t("tableToExcel"), icon: "xlsx", action: () => this.setTool("table") },
         { separator: true },
+        { label: t("readingMode"), icon: "reading", shortcut: `${MOD}+H`, action: () => this.toggleReading(true) },
         { label: t("presentation"), icon: "monitor", shortcut: "F5", action: () => this.togglePresentation(true) },
-        {
-          label: t("nightMode"),
-          checked: this.root.classList.contains("night"),
-          action: () => {
-            const on = this.root.classList.toggle("night");
-            try {
-              localStorage.setItem("laserpdf.night", on ? "1" : "0");
-            } catch {
-              /* ignore */
-            }
-          },
-        },
+        { label: t("nightMode"), checked: this.tone === "night", action: () => this.setTone(this.tone === "night" ? "normal" : "night") },
         { label: t("properties"), icon: "info", action: () => propertiesDialog(doc) },
         { label: t("shortcuts"), icon: "keyboard", action: () => shortcutsDialog() },
         { label: t("about"), icon: "file", action: () => aboutDialog(VERSION) },
@@ -1992,7 +2122,28 @@ export class App {
         this.viewer.zoomTo(1);
         return;
       }
+      if (mod && k === "h") {
+        e.preventDefault();
+        this.toggleReading();
+        return;
+      }
       if (typing) return;
+      // Reading mode only moves through the document; editing keys do nothing.
+      if (this.reading) {
+        const back = e.key === "ArrowLeft" || e.key === "PageUp";
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (this.search.isOpen) this.search.close();
+          else this.toggleReading(false);
+        } else if (back || e.key === "ArrowRight" || e.key === "PageDown") {
+          e.preventDefault();
+          this.viewer.scrollToPage(this.viewer.currentIndex + (back ? -1 : 1));
+        } else if ((e.key === "Home" || e.key === "End") && !mod) {
+          e.preventDefault();
+          this.viewer.scrollToPage(e.key === "Home" ? 0 : this.active.pages.length - 1);
+        }
+        return;
+      }
       if (mod && k === "z") {
         e.preventDefault();
         if (e.shiftKey) this.redo();
@@ -2076,7 +2227,7 @@ export class App {
 
   private async onPaste(e: ClipboardEvent): Promise<void> {
     const target = e.target as HTMLElement;
-    if (!this.active || target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    if (!this.active || this.reading || target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
     const items = Array.from(e.clipboardData?.items ?? []);
     const img = items.find((i) => i.type.startsWith("image/"));
     if (img) {

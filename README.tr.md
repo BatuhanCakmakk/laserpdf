@@ -26,7 +26,8 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 - Yakınlaştırma (Ctrl + tekerlek, genişliğe veya sayfaya sığdır), sayfa gezintisi, küçük resimler ve yer imleri paneli
 - Belgede arama (Türkçe İ/ı duyarlı), metin seçme ve kopyalama
 - Bağlantılar (iç bağlantılar sayfaya gider, dış bağlantılar tarayıcıda açılır)
-- Birden çok belge için sekmeler, son açılan dosyalar, sunum modu (F5), gece okuma modu
+- Birden çok belge için sekmeler, son açılan dosyalar, sunum modu (F5)
+- Okuma modu (Ctrl+H): yalnızca sayfalar ve küçük bir çubuk, rahat okunan sayfa genişliği, normal, sepya veya gece sayfa tonu, tam ekran
 - Uygulama açıkken başka bir PDF açıldığında yeni sekmede açılır
 
 ### Düzenleme
@@ -58,7 +59,7 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 ### Araçlar
 - PDF birleştirme, görsellerden PDF oluşturma, yeni boş belge
 - Sayfa numarası, üst/alt bilgi (örn. `GİZLİ · Sayfa {n} / {total}`) ve filigran
-- **Kitapçık:** Kâğıdın her yüzüne katlama sırasına göre iki sayfa; çift taraflı yazdırmak için
+- **Kitapçık:** Kâğıdın her yüzüne katlama sırasına göre iki sayfa; çift taraflı yazdırmak için (Geri al ile sayfalar geri gelir)
 - Belge özellikleri (başlık, yazar, konu, anahtar kelimeler)
 - Kaydederken **gizli bilgileri silme:** oluşturan program, tarihler, XMP verileri, yorum yazarları ve fotoğraflardaki konum/kamera bilgisi. Eklenen fotoğrafların konum bilgisi her zaman silinir
 - **Metin tanıma (OCR):** Taranmış sayfaların metnini tanır ve sayfaya görünmez bir metin katmanı ekler; metin aranabilir, seçilebilir ve kopyalanabilir olur. Türkçe ve İngilizce, tamamen çevrimdışı (Tesseract). Taranmış bir belge açıldığında önerilir; 150 dpi altındaki taramalarda dakikalarca uğraşmak yerine nedenini söyler
@@ -152,6 +153,7 @@ LaserPDF çevrimdışı çalışır. Hesap, reklam ve analitik yoktur, ağ iste�
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
 | Ctrl + / Ctrl − / Ctrl+0 | Yakınlaştır / Uzaklaştır / %100 |
 | Ctrl+Tab, Ctrl+W | Sekmeler arası geçiş, sekmeyi kapat |
+| Ctrl+H / Esc | Okuma moduna gir / çık |
 | F5 / Esc | Sunum moduna gir / çık |
 | Boşluk (basılı tut) | Geçici el aracı |
 | V H E T | Seç, El, Metni düzenle, Metin ekle |

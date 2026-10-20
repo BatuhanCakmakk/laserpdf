@@ -133,6 +133,8 @@ export class Viewer {
   doc: DocSession | null = null;
   scale = 1;
   fit: "width" | "page" | null = "width";
+  /** Widest a page gets when fitting the width, in screen pixels (reading mode keeps lines readable). */
+  maxFitWidth = Infinity;
   views = new Map<string, PageView>();
   private order: PageView[] = [];
   private io: IntersectionObserver;
@@ -327,6 +329,11 @@ export class Viewer {
     this.applyFit();
   }
 
+  /** Fits again after the available space or the fit limits changed. */
+  refit(): void {
+    if (this.fit) this.applyFit();
+  }
+
   private applyFit(): void {
     if (!this.doc || !this.order.length || !this.fit) return;
     const pv = this.order[this.current] ?? this.order[0];
@@ -334,7 +341,7 @@ export class Viewer {
     const maxW = Math.max(...this.order.map((p) => displaySize(p.ref).w));
     const availW = this.el.clientWidth - 48;
     const availH = this.el.clientHeight - 2 * PAGE_GAP;
-    const s = this.fit === "width" ? Math.min(availW / maxW, 2.5) : Math.min(availW / w, availH / h);
+    const s = this.fit === "width" ? Math.min(Math.min(availW, this.maxFitWidth) / maxW, 2.5) : Math.min(availW / w, availH / h);
     if (s > 0 && Math.abs(s - this.scale) > 1e-3) {
       const idx = this.current;
       this.setScale(s);

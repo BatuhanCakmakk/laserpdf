@@ -2473,6 +2473,89 @@ kbd {
   display: none;
 }
 
+/* ------------------------------------------------------------ reading mode */
+
+#app.reading > .toolbar,
+#app.reading > .propbar {
+  display: none !important;
+}
+
+#app.reading .sidebar {
+  visibility: hidden;
+}
+
+#app.reading .workspace {
+  grid-template-columns: 0 1fr !important;
+}
+
+/* Annotations are shown but cannot be picked up; links still work. */
+#app.reading .obj:not(.obj-link) {
+  pointer-events: none;
+}
+
+#app.reading .obj-link {
+  cursor: pointer;
+  border-color: transparent;
+  background: transparent;
+}
+
+#app.reading .obj-link:hover {
+  background: rgb(47 107 255 / 0.1);
+}
+
+.reading-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 16;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgb(16 24 40 / 0.18);
+  transition: opacity 0.35s ease;
+  white-space: nowrap;
+}
+
+#app.reading .reading-bar {
+  display: flex;
+}
+
+.reading-bar.idle:not(:hover):not(:focus-within) {
+  opacity: 0;
+}
+
+.reading-page,
+.reading-zoom {
+  min-width: 58px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.reading-zoom {
+  min-width: 46px;
+}
+
+.reading-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+@media (max-width: 560px) {
+  .reading-bar .reading-zoom,
+  .reading-bar .reading-sep {
+    display: none;
+  }
+}
+
 /* ---------------------------------------------------------- compact toolbar */
 
 @media (max-width: 1180px) {
@@ -2538,4 +2621,14 @@ kbd {
 
 .modal-text + .form-grid {
   margin-top: 12px;
+}
+
+/* Sepia: warm paper tone for long reading. */
+#app.sepia .page-raster,
+#app.sepia .thumb-canvas {
+  filter: sepia(0.65) saturate(1.2) brightness(0.96);
+}
+
+#app.sepia .page {
+  background: #f4ecd8;
 }

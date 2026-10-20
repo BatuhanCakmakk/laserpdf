@@ -647,7 +647,7 @@ export function shortcutsDialog(): void {
     ["sc_find", `${mod}+F`], ["sc_undo", `${mod}+Z / ${mod}+Y`], ["sc_zoom", `${mod}+ + / ${mod}+ − / ${mod}+0`],
     ["sc_tools", "V H E T P M R O L A W N"], ["sc_delete", "Delete"], ["sc_dup", `${mod}+D`],
     ["sc_copy", `${mod}+C / ${mod}+V`], ["sc_nudge", "← ↑ → ↓ (Shift ×10)"], ["sc_pages", "PgUp / PgDn / Home / End"],
-    ["sc_closeTab", `${mod}+W`], ["sc_esc", "Esc"],
+    ["sc_closeTab", `${mod}+W`], ["readingMode", `${mod}+H`], ["presentation", "F5"], ["sc_esc", "Esc"],
   ];
   modal({
     title: t("shortcutsTitle"),
