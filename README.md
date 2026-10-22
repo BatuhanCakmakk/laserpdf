@@ -6,6 +6,8 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 
 <a href="https://apps.microsoft.com/detail/9NWK3HL0L4KB"><img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft" height="52"></a>
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/batuhancakmak)
+
 ![LaserPDF](docs/banner.png)
 
 - **Small:** built with [Tauri](https://tauri.app), so it uses the web engine that ships with Windows (WebView2) instead of bundling a browser like Electron apps do. The Store package is about 38 MB, most of it fonts for Chinese, Japanese and Korean and the text recognition models.
@@ -195,6 +197,10 @@ src-tauri/      Rust side: window, file access, file associations, MCP stdio bri
 - Encrypted PDFs can be opened; their pages are saved as images.
 - Edited right-to-left text (Arabic, Hebrew) is not shaped yet.
 - Added text uses the embedded Arimo, Tinos, Cousine, Carlito and Caladea fonts (same letter widths as Arial, Times New Roman, Courier New and Calibri; Caladea is close to Cambria). DejaVu covers other characters and Noto Sans covers Chinese, Japanese and Korean, so text looks right in every PDF reader.
+
+## Support
+
+If LaserPDF saves you some time, you can [buy me a coffee](https://buymeacoffee.com/batuhancakmak) ☕. Bug reports and pull requests help just as much.
 
 ## License
 LaserPDF is licensed under the [GNU GPL v3.0](LICENSE) or (at your option) any later version.

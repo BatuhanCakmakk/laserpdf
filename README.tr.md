@@ -6,6 +6,8 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 
 <a href="https://apps.microsoft.com/detail/9NWK3HL0L4KB"><img src="https://get.microsoft.com/images/tr%20dark.svg" alt="Microsoft Store'dan edinin" height="52"></a>
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/batuhancakmak)
+
 ![LaserPDF](docs/tr/banner.png)
 
 - **Küçük:** [Tauri](https://tauri.app) ile yapıldı. Electron uygulamaları gibi tarayıcıyı içinde taşımaz, Windows'un kendi web motorunu (WebView2) kullanır. Store paketi yaklaşık 38 MB; bunun çoğu Çince, Japonca ve Korece yazı tipleri ile metin tanıma modelleri.
@@ -197,6 +199,10 @@ src-tauri/      Rust tarafı: pencere, dosya erişimi, dosya ilişkilendirmeleri
 - Şifreli PDF'ler açılabilir; sayfaları görüntü olarak kaydedilir.
 - Düzenlenen sağdan sola metin (Arapça, İbranice) henüz doğru şekillendirilmiyor.
 - Eklenen metin gömülü Arimo, Tinos, Cousine, Carlito ve Caladea yazı tiplerini kullanır (Arial, Times New Roman, Courier New ve Calibri ile aynı harf genişlikleri; Caladea, Cambria'ya yakındır). Diğer karakterleri DejaVu, Çince, Japonca ve Korece'yi Noto Sans karşılar; böylece metin her PDF okuyucuda doğru görünür.
+
+## Destek
+
+LaserPDF işine yaradıysa bana [bir kahve ısmarlayabilirsin](https://buymeacoffee.com/batuhancakmak) ☕. Hata bildirimleri ve katkılar da en az o kadar değerli.
 
 ## Lisans
 LaserPDF, [GNU GPL v3.0](LICENSE) ya da (tercihinize göre) daha sonraki bir sürümüyle lisanslanmıştır.
