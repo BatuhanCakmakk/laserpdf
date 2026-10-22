@@ -122,6 +122,8 @@ LaserPDF, `--mcp` ile başlatıldığında pencere açmadan bir [Model Context P
 
 Dosya yazan araçlar yalnızca verilen `output` yoluna yazar ve var olan bir dosyanın üzerine `overwrite: true` olmadan yazmaz.
 
+Boştaki sunucu neredeyse hiç kaynak kullanmaz: PDF motoru (gizli pencere) ilk araç çağrısında açılır ve 5 dakika araç çağrılmazsa kapanır. Böylece her sohbette LaserPDF'i başlatan bir asistan onu sürekli çalışır tutmaz.
+
 `claude_desktop_config.json`:
 
 ```json

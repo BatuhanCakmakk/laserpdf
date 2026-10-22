@@ -1,0 +1,694 @@
+[
+  {
+    "name": "get_pdf_info",
+    "title": "PDF information",
+    "description": "Reads a PDF's overview and returns it as text: page count, page sizes in mm, title, author, subject, keywords, creating program, dates, whether it is encrypted, and which pages have no text layer (scans that need recognize_text). Call it first on an unknown file to decide what to do next; for the text itself use extract_text, to find a word use search_pdf. Read-only. An encrypted PDF needs its password; a missing or damaged file is reported as an error.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "extract_text",
+    "title": "Extract text",
+    "description": "Extracts the text layer of a PDF and returns it as plain text, one \"--- Page N ---\" section per page, in reading order. Use it to read, summarize or quote a document; to find where a word occurs, search_pdf is faster, and for tables export_table keeps rows and columns. Scanned pages have no text layer and come back marked as empty: run recognize_text on the file first, then extract from its output. Encrypted PDFs need their password. Very long documents stop after about 400,000 characters with a note; ask for fewer pages. Read-only; the file is not changed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "search_pdf",
+    "title": "Search text",
+    "description": "Finds every occurrence of a word or phrase in a PDF and returns the count and, for each match, the page number and the line it is on (up to 500). Matching is literal text (no wildcards or regular expressions), case-insensitive by default and Turkish İ/ı aware; a phrase is found within one line of text. Use it to locate something without reading the whole document; to read pages use extract_text, and to black out what was found use redact_pdf with the same words. Scanned pages have no text and give no matches until recognize_text is run. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "query": {
+          "type": "string",
+          "description": "Word or phrase to find, as plain text."
+        },
+        "match_case": {
+          "type": "boolean",
+          "description": "Only match the exact upper/lower case (default false)."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        }
+      },
+      "required": [
+        "path",
+        "query"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "recognize_text",
+    "title": "Recognize text (OCR)",
+    "description": "Recognizes the text of scanned pages or images (Turkish and English, offline, no upload) and writes a copy of the PDF with an invisible text layer, so the text can be searched, selected and copied. Use it when get_pdf_info lists pages without text or extract_text returns them empty; then run extract_text, search_pdf or export_table on the output. Pages that already have text are left as they are. Scans below 150 dpi are skipped unless force is true, as their text is mostly misread. Takes a few seconds per page. The original is not changed, and an existing output file is only replaced with overwrite: true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF or image."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Also recognize low-resolution scans."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "redact_pdf",
+    "title": "Redact text",
+    "description": "Permanently blacks out (or whites out) every occurrence of the given words or phrases in a new copy of a PDF: each is covered with a box and the text underneath is removed from the file, so it cannot be selected, searched or copied. Use it for names, numbers or other content visible on the pages; for hidden information such as the author, use remove_metadata (often both before sharing), and use search_pdf first to check what will be hit. Something under a box that cannot be cut (an image or scan) is converted to an image when flatten_unsafe is true, otherwise left hidden and reported. Returns the number of occurrences redacted; nothing is written when none is found. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "terms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Words or phrases to redact."
+        },
+        "match_case": {
+          "type": "boolean",
+          "description": "Only match the exact upper/lower case (default false)."
+        },
+        "color": {
+          "type": "string",
+          "enum": [
+            "black",
+            "white"
+          ],
+          "description": "Box colour (default black)."
+        },
+        "flatten_unsafe": {
+          "type": "boolean",
+          "description": "Convert pages with content that cannot be cut to images (default false)."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "terms",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "remove_metadata",
+    "title": "Remove hidden information",
+    "description": "Writes a copy of a PDF with its hidden information removed: author, title, subject, keywords, creating program, dates, XMP metadata, comment authors, leftovers of earlier edits and photo location/camera data. Use it before sharing a file; the visible pages stay exactly the same. To remove visible text, use redact_pdf; to only read the information, use get_pdf_info. The original is never changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved this way.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "merge_pdfs",
+    "title": "Merge PDFs",
+    "description": "Joins several PDFs and images (JPEG, PNG, WebP, GIF, BMP, AVIF) into one new PDF, in the order given: all pages of each PDF, and each image centred on an A4 page of its own. Use it to combine documents or turn photos and scans into a PDF; to take pages out, use extract_pages or split_pdf, and to turn pages into images, use pdf_to_images. The inputs are not changed, and an existing output file is only replaced with overwrite: true. Fails with a message when a path cannot be read, when no file is a PDF or image, and for encrypted PDFs; other files in the list are skipped.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Absolute paths of the PDFs and images, in the order wanted (at least one)."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "paths",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "extract_pages",
+    "title": "Extract pages",
+    "description": "Writes the chosen pages of a PDF to a new PDF, in the order given (\"3,1\" puts page 3 first). Use it to pull out or reorder pages; to cut a whole document into equal parts, use split_pdf. The original is not changed, and an existing output file is only replaced with overwrite: true. Fails with a message for an invalid or out-of-range page and for encrypted PDFs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages to keep, in the order wanted, e.g. \"3,1-2\" (each page is written once; repeats are ignored)."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "pages",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "rotate_pages",
+    "title": "Rotate pages",
+    "description": "Rotates every page, or the chosen pages, clockwise by 90, 180 or 270 degrees and writes the whole document to a new PDF. Use it for sideways or upside-down scans; page content is not altered, only its display rotation, which is added to any rotation the page already has. The original is not changed, and an existing output file is only replaced with overwrite: true. Fails with a message for an invalid page range and for encrypted PDFs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "degrees": {
+          "type": "number",
+          "enum": [
+            90,
+            180,
+            270
+          ],
+          "description": "Clockwise turn added to the current rotation."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "degrees",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "export_table",
+    "title": "Export a table to Excel",
+    "description": "Reads the table on one page of a PDF and writes it as an .xlsx workbook, and returns the rows found as a preview. Without an area, a table drawn with lines is found by itself; otherwise the whole page is read. Rows and columns follow the table's lines when it has them; amounts (1.234,56 or 1,234.56) become numbers, codes and dates stay text. Use it for tables you want to calculate with; for plain text use extract_text. Scanned pages need recognize_text first; a page without text is an error. The original is not changed, and an existing output file is only replaced with overwrite: true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "page": {
+          "type": "number",
+          "description": "Page number (1-based)."
+        },
+        "area": {
+          "type": "object",
+          "description": "Optional area in points from the page's top-left corner.",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          }
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the .xlsx file to write."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "page",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "split_pdf",
+    "title": "Split a PDF",
+    "description": "Splits a PDF into new files of a given number of pages each (the last may be shorter), named <base>-01.pdf, <base>-02.pdf, ... in an existing folder, and lists them. Use it to cut a long document into equal parts; for chosen pages or a different order, use extract_pages. The original is not changed; if any of the files exists, nothing is written unless overwrite is true. Encrypted PDFs cannot be split.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "pages_per_file": {
+          "type": "number",
+          "description": "Pages in each file (at least 1)."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Absolute path of an existing folder for the new files."
+        },
+        "base_name": {
+          "type": "string",
+          "description": "Start of the file names (default: the PDF's name)."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        }
+      },
+      "required": [
+        "path",
+        "pages_per_file",
+        "output_dir"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "add_page_numbers",
+    "title": "Add page numbers",
+    "description": "Writes page numbers, or a header/footer such as \"Confidential - Page {n} of {total}\", onto every page or the chosen pages of a PDF and saves the result as a new PDF. The text is placed at the chosen corner or edge, and stays real, searchable text. For a large diagonal stamp across the page, use add_watermark. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "format": {
+          "type": "string",
+          "description": "Text with {n} for the page number and {total} for the page count (default \"{n}\")."
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "bottom-center",
+            "bottom-right",
+            "bottom-left",
+            "top-center",
+            "top-right",
+            "top-left"
+          ],
+          "description": "Default bottom-center."
+        },
+        "start": {
+          "type": "number",
+          "description": "Number of the first page (default 1)."
+        },
+        "font_size": {
+          "type": "number",
+          "description": "Default 10."
+        },
+        "margin": {
+          "type": "number",
+          "description": "Distance from the page edge in points (default 24)."
+        },
+        "color": {
+          "type": "string",
+          "description": "Text colour (default dark grey), as #rrggbb."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "add_watermark",
+    "title": "Add a watermark",
+    "description": "Writes a large, semi-transparent, rotated text (e.g. CONFIDENTIAL, DRAFT) across the middle of every page or the chosen pages of a PDF and saves the result as a new PDF; the page content stays readable underneath. For small text in a corner or a footer, use add_page_numbers. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be saved.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "text": {
+          "type": "string",
+          "description": "Watermark text."
+        },
+        "font_size": {
+          "type": "number",
+          "description": "Default 64."
+        },
+        "angle": {
+          "type": "number",
+          "description": "Rotation in degrees; negative values rise to the right (default -45)."
+        },
+        "opacity": {
+          "type": "number",
+          "description": "0.05 to 1 (default 0.2)."
+        },
+        "color": {
+          "type": "string",
+          "description": "Text colour (default red), as #rrggbb."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "compress_pdf",
+    "title": "Compress a PDF",
+    "description": "Makes a PDF smaller by redrawing every page as a JPEG image at the chosen quality, and returns the size before and after. Best for scans and photo-heavy files; for documents that are mostly text it usually makes the file larger, which the result then says. The text is no longer selectable afterwards: run recognize_text on the result to make it searchable again. To get separate image files instead, use pdf_to_images. The original is not changed, and an existing output file is only replaced with overwrite: true. Encrypted PDFs cannot be compressed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "low: 96 dpi, smallest; medium: 144 dpi (default); high: 200 dpi."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        },
+        "output": {
+          "type": "string",
+          "description": "Absolute path of the new PDF. If the file exists, the call fails unless overwrite is true."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        }
+      },
+      "required": [
+        "path",
+        "output"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "pdf_to_images",
+    "title": "Save pages as images",
+    "description": "Saves every page, or the chosen pages, of a PDF as PNG or JPEG images named <base>-01.png, <base>-02.png, ... (by page number) in an existing folder, and lists the files with their pixel sizes. Use it to share a page as a picture, insert it into a slide or chat, or look at a page's layout; to read the text, use extract_text, and to make a smaller PDF, use compress_pdf. The PDF is not changed; existing images are only replaced with overwrite: true. Encrypted PDFs cannot be converted.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path of the PDF."
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "Absolute path of an existing folder for the images."
+        },
+        "pages": {
+          "type": "string",
+          "description": "Pages as 1-based numbers and ranges, e.g. \"1-3,5\". All pages when omitted; a page outside the document is an error."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "description": "png (default) is sharp for text and drawings; jpeg is smaller for photos and scans."
+        },
+        "dpi": {
+          "type": "number",
+          "description": "Resolution, 36 to 600 (default 150; 72 is screen size, 300 is print quality)."
+        },
+        "base_name": {
+          "type": "string",
+          "description": "Start of the file names (default: the PDF's name)."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow replacing an existing file (default false)."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password, if the PDF is encrypted. Without it an encrypted PDF cannot be opened; with it, it can be read, but tools that write a new PDF cannot save it."
+        }
+      },
+      "required": [
+        "path",
+        "output_dir"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

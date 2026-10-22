@@ -1,5 +1,6 @@
 // Drives `laserpdf --mcp` like an MCP client: handshake, tool list, and a call to every tool.
 // Usage: node tests/mcp.mjs <laserpdf.exe> <workDir>
+// The idle time is shortened, so the test also sees the PDF engine close and start again.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -33,7 +34,15 @@ const input = join(work, "input.pdf");
 writeFileSync(input, await doc.save());
 for (const n of ["redacted.pdf", "clean.pdf", "merged.pdf", "pages.pdf", "rotated.pdf", "table.xlsx", "numbered.pdf", "watermarked.pdf", "compressed.pdf", "part-01.pdf", "part-02.pdf", "img-01.png", "img-03.png", "img-03.jpg", "x2.pdf"]) if (existsSync(join(work, n))) rmSync(join(work, n));
 
-const child = spawn(exe, ["--mcp"], { stdio: ["pipe", "pipe", "inherit"] });
+const IDLE_SECS = 4;
+const child = spawn(exe, ["--mcp"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, LASERPDF_MCP_IDLE_SECS: String(IDLE_SECS) } });
+// The server logs to stderr when its hidden PDF engine starts or closes.
+const engine = { started: 0, closed: 0 };
+createInterface({ input: child.stderr }).on("line", (line) => {
+  if (/PDF engine closed/.test(line)) engine.closed++;
+  else if (/starting the PDF engine/.test(line)) engine.started++;
+  else if (/^laserpdf:/.test(line)) console.log("   ", line);
+});
 const pending = new Map();
 let nextId = 1;
 createInterface({ input: child.stdout }).on("line", (line) => {
@@ -73,7 +82,11 @@ try {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const list = await request("tools/list", {});
   const names = list.result?.tools?.map((t) => t.name) ?? [];
-  check(names.length >= 15, `tools listed after the window loaded (${Date.now() - t0} ms): ${names.join(", ")}`);
+  const defined = JSON.parse(readFileSync(new URL("../src/mcp-tools.json", import.meta.url), "utf8"));
+  check(names.length === 15 && JSON.stringify(list.result.tools) === JSON.stringify(defined), `tools listed (${Date.now() - t0} ms): ${names.join(", ")}`);
+  const other = await request("resources/list", {});
+  check(other.error?.code === -32601, "other methods are answered as not found");
+  check(engine.started === 0, "the handshake and the tool list do not start the PDF engine");
 
   const info = await call("get_pdf_info", { path: input });
   check(/Pages: 3/.test(info.text) && /Gizli Yazar/.test(info.text), "get_pdf_info reports pages and author");
@@ -137,6 +150,13 @@ try {
 } catch (e) {
   console.error(e);
   failures++;
+}
+if (!failures) {
+  check(engine.started === 1, "the first tool call started the PDF engine once");
+  await new Promise((r) => setTimeout(r, (IDLE_SECS * 2 + 2) * 1000));
+  check(engine.closed === 1, `the engine closes after ${IDLE_SECS} s without tool calls`);
+  const after = await call("get_pdf_info", { path: input });
+  check(/Pages: 3/.test(after.text) && engine.started === 2, "a later tool call starts it again and works");
 }
 child.stdin.end();
 const code = await new Promise((r) => {

@@ -122,6 +122,8 @@ Started with `--mcp`, LaserPDF runs as a [Model Context Protocol](https://modelc
 
 Tools that write files only write to the `output` path they are given and never overwrite an existing file unless `overwrite: true` is set.
 
+An idle server costs almost nothing: the PDF engine (a hidden window) starts with the first tool call and closes again after 5 minutes without one, so an assistant that starts LaserPDF for every conversation does not keep it running.
+
 `claude_desktop_config.json`:
 
 ```json
