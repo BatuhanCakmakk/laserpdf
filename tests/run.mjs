@@ -140,6 +140,14 @@ try {
   await (await fc).setFiles(sample);
   await page.waitForSelector(".page-raster");
   check((await page.locator(".page").count()) === 4, "4 pages shown");
+  await page.waitForSelector(".page .linkAnnotation a");
+  const linksOnTop = await page.evaluate(() =>
+    [...document.querySelectorAll(".page:first-child .linkAnnotation a")].map((a) => {
+      const r = a.getBoundingClientRect();
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === a;
+    }),
+  );
+  check(linksOnTop.length === 2 && linksOnTop.every(Boolean), `links over text can be clicked, the first one on the page too (${linksOnTop})`);
   check((await page.locator(".toolbar .tb-doc-tools button:not(:disabled)").count()) === 7, "page tools are on the toolbar");
   const fits = () => page.evaluate(() => {
     const tb = document.querySelector(".toolbar");

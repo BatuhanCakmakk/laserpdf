@@ -950,6 +950,11 @@ li.open > .outline-item .outline-toggle {
   z-index: 1;
 }
 
+/* pdf.js numbers the annotations from z-index 0, so without its own layer the first link on a page sits under the text. */
+.page-inner > .annotationLayer {
+  z-index: 2;
+}
+
 .page:not([data-tool="select"]) .textLayer,
 .page[data-tool="select"] .obj-layer.dragging ~ * {
   pointer-events: none;
