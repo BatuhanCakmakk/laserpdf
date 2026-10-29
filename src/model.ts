@@ -158,3 +158,12 @@ export function displaySize(p: PageRef): { w: number; h: number } {
   const r = pageRotation(p);
   return r % 180 === 0 ? { w: p.w, h: p.h } : { w: p.h, h: p.w };
 }
+
+/** A rectangle in unrotated page coordinates, as it appears on the displayed (rotated) page. */
+export function displayRect(p: PageRef, x: number, y: number, w: number, h: number): { x: number; y: number; w: number; h: number } {
+  const r = pageRotation(p);
+  if (r === 90) return { x: p.h - y - h, y: x, w: h, h: w };
+  if (r === 180) return { x: p.w - x - w, y: p.h - y - h, w, h };
+  if (r === 270) return { x: y, y: p.w - x - w, w: h, h: w };
+  return { x, y, w, h };
+}

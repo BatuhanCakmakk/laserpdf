@@ -1,6 +1,7 @@
 import type { Asset, DocMeta, Obj, OutlineItem, PageRef, Source } from "./model";
 import { uid } from "./model";
 import { loadPdf } from "./engine";
+import type { Fit, Layout, ViewPos } from "./viewer";
 
 interface Snapshot {
   pages: PageRef[];
@@ -30,8 +31,17 @@ export class DocSession {
   dirty = false;
   /** Grows with every change, so autosave knows when there is something new to keep. */
   revision = 0;
-  /** Scroll/zoom state remembered when switching tabs. */
-  view = { scale: 0, scrollTop: 0, scrollLeft: 0, fit: "width" as "width" | "page" | null };
+  /** Scroll/zoom state remembered when switching tabs; `resume` is where the file was left last time. */
+  view: {
+    scale: number;
+    scrollTop: number;
+    scrollLeft: number;
+    fit: Fit | null;
+    layout: Layout;
+    resume: { pos: ViewPos; scale: number; fit: Fit | null } | null;
+  } = { scale: 0, scrollTop: 0, scrollLeft: 0, fit: "auto", layout: "single", resume: null };
+  /** Places to go back and forward to after jumping (links, bookmarks, page numbers). */
+  history: { back: ViewPos[]; forward: ViewPos[] } = { back: [], forward: [] };
 
   private undoStack: Snapshot[] = [];
   private redoStack: Snapshot[] = [];

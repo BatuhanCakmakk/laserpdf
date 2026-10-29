@@ -2,12 +2,24 @@ import type { PDFPageProxy, RenderTask } from "pdfjs-dist";
 import { pdfjs } from "./engine";
 import type { DocSession } from "./doc";
 import type { PageRef } from "./model";
-import { displaySize, pageRotation } from "./model";
+import { displayRect, displaySize, pageRotation } from "./model";
 
 const PAGE_GAP = 16;
 const MAX_CANVAS_PIXELS = 16_000_000;
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 8;
+/** "Automatic" zoom: the page width, but no larger than this, so a wide window does not blow pages up. */
+const AUTO_MAX_SCALE = 1.5;
+
+export type Fit = "auto" | "width" | "page";
+/** One page per row, two side by side, or two with the first page (the cover) alone on the right. */
+export type Layout = "single" | "double" | "cover";
+
+/** A place in the document: a page and how far down it the view starts (0..1). */
+export interface ViewPos {
+  page: string;
+  off: number;
+}
 
 export class PageView {
   readonly el: HTMLDivElement;
@@ -132,7 +144,8 @@ export class Viewer {
   readonly pagesEl: HTMLDivElement;
   doc: DocSession | null = null;
   scale = 1;
-  fit: "width" | "page" | null = "width";
+  fit: Fit | null = "auto";
+  layout: Layout = "single";
   /** Widest a page gets when fitting the width, in screen pixels (reading mode keeps lines readable). */
   maxFitWidth = Infinity;
   views = new Map<string, PageView>();
@@ -194,6 +207,7 @@ export class Viewer {
     this.pagesEl.replaceChildren();
     this.doc = doc;
     if (!doc) return;
+    this.setLayoutClass(doc.view.layout);
     this.syncPages();
     if (doc.view.scale) {
       this.fit = doc.view.fit;
@@ -202,18 +216,52 @@ export class Viewer {
       this.el.scrollLeft = doc.view.scrollLeft;
       if (this.fit) this.applyFit();
     } else {
-      // A newly opened document starts at the top.
+      // A newly opened document starts at the top, or where it was left last time.
       this.el.scrollTop = 0;
       this.el.scrollLeft = 0;
-      this.fit = "width";
-      this.applyFit();
+      const r = doc.view.resume;
+      this.fit = r ? r.fit : doc.view.fit;
+      if (!this.fit) this.setScale(r ? r.scale : 1);
+      this.applyFit(true);
+      if (r) this.restore(r.pos);
     }
     this.updateCurrent(true);
   }
 
   saveViewState(): void {
     if (!this.doc) return;
-    this.doc.view = { scale: this.scale, scrollTop: this.el.scrollTop, scrollLeft: this.el.scrollLeft, fit: this.fit };
+    this.doc.view = { ...this.doc.view, scale: this.scale, scrollTop: this.el.scrollTop, scrollLeft: this.el.scrollLeft, fit: this.fit, layout: this.layout, resume: null };
+  }
+
+  private setLayoutClass(layout: Layout): void {
+    this.layout = layout;
+    this.pagesEl.classList.toggle("spread", layout !== "single");
+    this.pagesEl.classList.toggle("cover", layout === "cover");
+  }
+
+  /** Shows pages one per row or two side by side, keeping the current page in view. */
+  setLayout(layout: Layout): void {
+    if (layout === this.layout) return;
+    const pos = this.position();
+    this.setLayoutClass(layout);
+    if (this.doc) this.doc.view.layout = layout;
+    this.applyFit(true);
+    if (pos) this.restore(pos);
+    this.updateCurrent(true);
+  }
+
+  /** The current place, to come back to later (history, reopening the file). */
+  position(): ViewPos | null {
+    const pv = this.order[this.current];
+    if (!pv) return null;
+    const off = (this.el.scrollTop + PAGE_GAP - pv.el.offsetTop) / pv.el.offsetHeight;
+    return { page: pv.ref.id, off: Math.max(0, Math.min(1, off)) };
+  }
+
+  restore(pos: ViewPos): void {
+    const i = this.order.findIndex((p) => p.ref.id === pos.page);
+    if (i < 0) return;
+    this.scrollToPage(i, false, pos.off * this.order[i].el.offsetHeight);
   }
 
   /** Rebuilds the page list after pages were added, removed, moved or rotated. */
@@ -324,7 +372,7 @@ export class Viewer {
     }
   }
 
-  setFit(fit: "width" | "page"): void {
+  setFit(fit: Fit): void {
     this.fit = fit;
     this.applyFit();
   }
@@ -334,17 +382,22 @@ export class Viewer {
     if (this.fit) this.applyFit();
   }
 
-  private applyFit(): void {
+  /** `keep`: the caller restores the position itself. */
+  private applyFit(keep = false): void {
     if (!this.doc || !this.order.length || !this.fit) return;
     const pv = this.order[this.current] ?? this.order[0];
     const { w, h } = displaySize(pv.ref);
+    // Two pages side by side need room for both and the gap between them.
+    const across = this.layout === "single" ? 1 : 2;
     const maxW = Math.max(...this.order.map((p) => displaySize(p.ref).w));
-    const availW = this.el.clientWidth - 48;
+    const availW = this.el.clientWidth - 48 - (across - 1) * PAGE_GAP;
     const availH = this.el.clientHeight - 2 * PAGE_GAP;
-    const s = this.fit === "width" ? Math.min(Math.min(availW, this.maxFitWidth) / maxW, 2.5) : Math.min(availW / w, availH / h);
+    const width = Math.min(Math.min(availW, this.maxFitWidth * across) / (maxW * across), 2.5);
+    const s = this.fit === "page" ? Math.min(availW / (w * across), availH / h) : this.fit === "auto" ? Math.min(width, AUTO_MAX_SCALE) : width;
     if (s > 0 && Math.abs(s - this.scale) > 1e-3) {
       const idx = this.current;
       this.setScale(s);
+      if (keep) return;
       if (this.fit === "page") this.scrollToPage(idx, false);
       else this.updateCurrent(true);
     }
@@ -364,11 +417,17 @@ export class Viewer {
     return this.order[Math.min(lo, this.order.length - 1)];
   }
 
+  /** First page of the row that page `i` is on (pages side by side share a row). */
+  private rowStart(i: number): number {
+    while (i > 0 && this.order[i - 1].el.offsetTop === this.order[i].el.offsetTop) i--;
+    return i;
+  }
+
   private updateCurrent(force = false): void {
     if (!this.order.length) return;
     const mid = this.el.scrollTop + this.el.clientHeight * 0.35;
     const pv = this.pageAtY(mid);
-    const idx = pv ? this.order.indexOf(pv) : 0;
+    const idx = pv ? this.rowStart(this.order.indexOf(pv)) : 0;
     if (idx !== this.current || force) {
       this.current = Math.max(0, idx);
       this.hooks.onCurrentPage(this.current);
@@ -383,21 +442,27 @@ export class Viewer {
     const pv = this.order[Math.max(0, Math.min(index, this.order.length - 1))];
     if (!pv) return;
     this.el.scrollTo({ top: pv.el.offsetTop - PAGE_GAP + offsetY, behavior: smooth ? "smooth" : "auto" });
-    this.current = this.order.indexOf(pv);
+    this.current = this.rowStart(this.order.indexOf(pv));
     this.hooks.onCurrentPage(this.current);
+  }
+
+  /** Goes to the next or previous page, or pair of pages when they are side by side. */
+  stepPage(dir: 1 | -1): void {
+    const i = this.current;
+    if (this.layout === "single" || !this.order[i]) return this.scrollToPage(i + dir);
+    const top = this.order[i].el.offsetTop;
+    let j = i;
+    if (dir > 0) while (j < this.order.length - 1 && this.order[j].el.offsetTop === top) j++;
+    else j = this.rowStart(Math.max(0, i - 1));
+    this.scrollToPage(j);
   }
 
   /** Scrolls so the given page-space rectangle is visible. */
   scrollToRect(pageId: string, x: number, y: number, w: number, h: number): void {
     const pv = this.views.get(pageId);
     if (!pv) return;
-    const r = pageRotation(pv.ref);
     const s = this.scale;
-    const { w: pw, h: ph } = pv.ref;
-    let X = x, Y = y, W = w, H = h;
-    if (r === 90) [X, Y, W, H] = [ph - y - h, x, h, w];
-    else if (r === 180) [X, Y] = [pw - x - w, ph - y - h];
-    else if (r === 270) [X, Y, W, H] = [y, pw - x - w, h, w];
+    const { x: X, y: Y, w: W, h: H } = displayRect(pv.ref, x, y, w, h);
     const top = pv.el.offsetTop + Y * s;
     const left = pv.el.offsetLeft + X * s;
     const vt = this.el.scrollTop;

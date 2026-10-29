@@ -37,6 +37,24 @@ export async function renderPdfToImages(
   return out;
 }
 
+/** Renders an area of the first page of a PDF to a PNG; `r` is in points from the top left of the page as displayed. */
+export async function renderArea(bytes: Uint8Array, r: { x: number; y: number; w: number; h: number }, dpi: number): Promise<Blob> {
+  const { pdf } = await loadPdf(bytes);
+  try {
+    const page = await pdf.getPage(1);
+    // Very large areas stay within what a canvas can hold.
+    const k = Math.min(dpi / 72, Math.sqrt(40_000_000 / (r.w * r.h)));
+    const vp = page.getViewport({ scale: k, offsetX: -r.x * k, offsetY: -r.y * k });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(r.w * k));
+    canvas.height = Math.max(1, Math.round(r.h * k));
+    await page.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport: vp, background: "#ffffff" }).promise;
+    return await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob"))), "image/png"));
+  } finally {
+    await pdf.loadingTask.destroy();
+  }
+}
+
 /** Rebuilds a PDF from JPEG renders of its pages. */
 export async function rasterizePdf(bytes: Uint8Array, dpi: number, quality: number, onPage?: (i: number, n: number) => void): Promise<Uint8Array> {
   const imgs = await renderPdfToImages(bytes, dpi, "image/jpeg", quality, onPage);

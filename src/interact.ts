@@ -13,7 +13,7 @@ export interface InteractionHooks {
   editNote(o: NoteObj): void;
   editLink(o: LinkObj): void;
   /** An area was selected with the table, crop or link tool. */
-  region(pv: PageView, r: Rect, tool: "table" | "crop" | "link"): void;
+  region(pv: PageView, r: Rect, tool: "table" | "crop" | "link" | "snapshot"): void;
   contextMenu(o: Obj, x: number, y: number): void;
   toast(msg: string): void;
 }
@@ -595,7 +595,7 @@ export class Interaction {
     previewBox.append(preview);
     L.objs.append(previewBox);
 
-    if (t === "table" || t === "crop" || t === "link") {
+    if (t === "table" || t === "crop" || t === "link" || t === "snapshot") {
       let p1 = p0;
       const box = document.createElement("div");
       box.className = t === "crop" ? "table-select crop-select" : "table-select";

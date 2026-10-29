@@ -21,7 +21,9 @@ export type Tool =
   /** Select the area of the page to keep. */
   | "crop"
   /** Draw the area of a link. */
-  | "link";
+  | "link"
+  /** Select an area to copy as an image. */
+  | "snapshot";
 
 export interface Settings {
   color: string;
@@ -72,6 +74,80 @@ export const settings: Settings = load();
 export function saveSettings(): void {
   try {
     localStorage.setItem("laserpdf.settings", JSON.stringify(settings));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** How documents open and the app looks; changed in the Settings window. */
+export interface Prefs {
+  zoom: "auto" | "width" | "page" | "100";
+  layout: "single" | "double" | "cover";
+  /** Reopen files at the page and zoom they were left at. */
+  resume: boolean;
+  /** Toolbar tab shown last. */
+  tab: string;
+  /** The hint to make LaserPDF the default PDF app was closed. */
+  defaultAppHidden: boolean;
+}
+
+const prefDefaults: Prefs = { zoom: "auto", layout: "single", resume: true, tab: "home", defaultAppHidden: false };
+
+export const prefs: Prefs = (() => {
+  try {
+    const raw = localStorage.getItem("laserpdf.prefs");
+    if (raw) return { ...prefDefaults, ...JSON.parse(raw) };
+  } catch {
+    /* storage unavailable */
+  }
+  return { ...prefDefaults };
+})();
+
+export function savePrefs(): void {
+  try {
+    localStorage.setItem("laserpdf.prefs", JSON.stringify(prefs));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Where each file was left: page, zoom and layout, by path. */
+export interface Place {
+  page: number;
+  off: number;
+  scale: number;
+  fit: "auto" | "width" | "page" | null;
+  layout: "single" | "double" | "cover";
+  time: number;
+}
+
+const PLACES_KEY = "laserpdf.places";
+const PLACES_MAX = 200;
+
+export function loadPlace(path: string): Place | null {
+  try {
+    return (JSON.parse(localStorage.getItem(PLACES_KEY) || "{}") as Record<string, Place>)[path] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePlace(path: string, place: Place): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(PLACES_KEY) || "{}") as Record<string, Place>;
+    all[path] = place;
+    // Keep the most recent files only.
+    const keys = Object.keys(all).sort((a, b) => all[b].time - all[a].time);
+    for (const k of keys.slice(PLACES_MAX)) delete all[k];
+    localStorage.setItem(PLACES_KEY, JSON.stringify(all));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function clearPlaces(): void {
+  try {
+    localStorage.removeItem(PLACES_KEY);
   } catch {
     /* storage unavailable */
   }

@@ -204,6 +204,18 @@ export async function openUrl(url: string): Promise<void> {
   } else window.open(url, "_blank", "noopener,noreferrer");
 }
 
+export const isWindows = /Windows/.test(navigator.userAgent);
+
+/** Opens Windows Settings at "Default apps", where the user picks the app for PDF files. */
+export async function openDefaultApps(): Promise<void> {
+  if (isTauri) await tauriInvoke("open_default_apps");
+}
+
+/** Whether .pdf files already open in LaserPDF (Windows only; false elsewhere). */
+export async function isDefaultPdfApp(): Promise<boolean> {
+  return isTauri ? tauriInvoke<boolean>("is_default_pdf_app") : false;
+}
+
 export async function setWindowTitle(title: string): Promise<void> {
   document.title = title;
   if (!isTauri) return;

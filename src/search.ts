@@ -7,9 +7,11 @@ import { h } from "./ui";
 import { icon } from "./icons";
 import { t } from "./i18n";
 
-interface Hit {
+export interface Hit {
   pageId: string;
   rect: Rect;
+  /** Found in the page's own text (not in a text box added in LaserPDF), so a redaction box removes it. */
+  inPage: boolean;
 }
 
 /** Folds case including Turkish dotted/dotless i, keeping one char per char. */
@@ -55,13 +57,14 @@ export class SearchBar {
   private input: HTMLInputElement;
   private countEl: HTMLSpanElement;
   private caseBtn: HTMLButtonElement;
+  private redactBtn: HTMLButtonElement;
   private hits: Hit[] = [];
   private active = -1;
   private matchCase = false;
   private runId = 0;
   private timer = 0;
 
-  constructor(private viewer: Viewer, private interaction: Interaction) {
+  constructor(private viewer: Viewer, private interaction: Interaction, private onRedact: (hits: Hit[]) => void) {
     this.input = h("input", { class: "search-input", placeholder: t("searchPlaceholder"), spellcheck: false });
     this.countEl = h("span", { class: "search-count" });
     this.caseBtn = h("button", { class: "icon-btn small", title: t("matchCase") }, icon("font", 16));
@@ -70,11 +73,13 @@ export class SearchBar {
       this.caseBtn.classList.toggle("active", this.matchCase);
       this.run();
     });
+    this.redactBtn = h("button", { class: "icon-btn small search-redact", title: t("redactAll"), disabled: true, onclick: () => this.onRedact(this.hits.filter((x) => x.inPage)) }, icon("whiteout", 16));
     this.el = h("div", { class: "searchbar", role: "search" },
       icon("search", 16),
       this.input,
       this.countEl,
       this.caseBtn,
+      this.redactBtn,
       h("button", { class: "icon-btn small", title: t("prevPage"), onclick: () => this.step(-1) }, icon("up", 16)),
       h("button", { class: "icon-btn small", title: t("nextPage"), onclick: () => this.step(1) }, icon("down", 16)),
       h("button", { class: "icon-btn small", title: t("close"), onclick: () => this.close() }, icon("x", 16)),
@@ -116,12 +121,18 @@ export class SearchBar {
     if (this.isOpen && this.input.value) this.run();
   }
 
+  /** The search term, e.g. to name it when redacting all results. */
+  get query(): string {
+    return this.input.value;
+  }
+
   private async run(): Promise<void> {
     const id = ++this.runId;
     const q = this.input.value;
     const doc = this.viewer.doc;
     this.hits = [];
     this.active = -1;
+    this.redactBtn.disabled = true;
     this.interaction.clearSearchHits();
     if (!doc || !q.trim()) {
       this.countEl.textContent = "";
@@ -149,7 +160,7 @@ export class SearchBar {
           // Page text under a whiteout box is removed on save.
           if (k >= original.length || !under(r, objs, (o) => !!o.redact)) {
             rects.push(r);
-            this.hits.push({ pageId: ref.id, rect: r });
+            this.hits.push({ pageId: ref.id, rect: r, inPage: k < original.length });
           }
           pos = s.indexOf(fq, pos + Math.max(1, fq.length));
         }
@@ -160,6 +171,7 @@ export class SearchBar {
     if (id !== this.runId) return;
     this.countEl.textContent = this.hits.length ? `${this.hits.length}` : t("noMatches");
     this.countEl.classList.toggle("none", !this.hits.length);
+    this.redactBtn.disabled = !this.hits.some((x) => x.inPage);
     for (const [pid, rects] of byPage) this.interaction.setSearchHits(pid, rects, -1);
     // Jump to the first hit at or after the current page.
     if (this.hits.length) {

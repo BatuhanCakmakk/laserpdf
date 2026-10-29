@@ -25,12 +25,16 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 
 ### Görüntüleme
 - Hızlı, ihtiyaç anında render (yüzlerce sayfalık belgeler anında açılır)
-- Yakınlaştırma (Ctrl + tekerlek, genişliğe veya sayfaya sığdır), sayfa gezintisi, küçük resimler ve yer imleri paneli
+- Yakınlaştırma (Ctrl + tekerlek, otomatik, genişliğe veya sayfaya sığdır), sayfa gezintisi, küçük resimler ve yer imleri paneli
+- Tek sayfa, iki sayfa yan yana ya da kapak tek başına olmak üzere iki sayfa
+- Bir bağlantı, yer imi ya da sayfa numarasıyla atladıktan sonra geri ve ileri (Alt+← / Alt+→ ya da farenin yan tuşları)
+- Dosyalar kaldığınız sayfada ve yakınlaştırmada açılır
 - Belgede arama (Türkçe İ/ı duyarlı), metin seçme ve kopyalama
 - Bağlantılar (iç bağlantılar sayfaya gider, dış bağlantılar tarayıcıda açılır)
 - Birden çok belge için sekmeler, son açılan dosyalar, sunum modu (F5)
 - Okuma modu (Ctrl+H): yalnızca sayfalar ve küçük bir çubuk, rahat okunan sayfa genişliği, normal, sepya veya gece sayfa tonu, tam ekran
 - Uygulama açıkken başka bir PDF açıldığında yeni sekmede açılır
+- Sekmelere ayrılmış araçlar (Giriş, Açıklama, Düzenleme, Sayfalar, Araçlar, Görünüm), her işlemi adıyla bulan **komut arama** (Ctrl+K) ve Ayarlar penceresi (varsayılan yakınlaştırma ve sayfa düzeni, dil, tema, varsayılan PDF uygulaması)
 
 ### Düzenleme
 - **Mevcut metni düzenleme:** Metne tıklayın, yazın. Eski metin sayfadan silinir, yeni metin aynı yere yazılır; renkli ya da desenli arka plan bozulmaz. Boyut, renk ve kalın/italik korunur; yazı tipi en yakın eşdeğerle değiştirilir (Arial/Helvetica, Times, Courier ve Calibri için harf genişlikleri birebir aynıdır).
@@ -40,7 +44,7 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 - **Damgalar:** ONAYLANDI, TASLAK, GİZLİDİR, tarih ya da tarih ve saat, özel metin veya adınızla birlikte tarih ve saat içeren damga
 - **İşaretleme:** vurgulama, altını çizme, üstünü çizme; kalem ve fosforlu kalem
 - **Şekiller:** dikdörtgen, elips, çizgi, ok (renk, dolgu, kalınlık, opaklık)
-- **Karartma:** Siyah veya beyaz bir kutu çizin; altındaki metin ve bağlantılar kaydederken dosyadan da silinir. Altında silinemeyen bir içerik varsa (görsel, taranmış sayfa, form alanı) o sayfayı görüntüye çevirmeyi önerir
+- **Karartma:** Siyah veya beyaz bir kutu çizin; altındaki metin ve bağlantılar kaydederken dosyadan da silinir. **Ara ve karart** bir aramanın bütün sonuçlarını tek seferde kapatır. Altında silinemeyen bir içerik varsa (görsel, taranmış sayfa, form alanı) o sayfayı görüntüye çevirmeyi önerir
 - **Bağlantılar:** Bir web adresini açan ya da belgedeki bir sayfaya giden alan çizin
 - **Yapışkan notlar:** PDF'e gerçek not açıklaması olarak kaydedilir
 - **Form doldurma:** metin alanları, onay kutuları, açılır listeler
@@ -66,7 +70,7 @@ Windows için hafif ve hızlı bir **PDF görüntüleyici ve düzenleyici**. PDF
 - Kaydederken **gizli bilgileri silme:** oluşturan program, tarihler, XMP verileri, yorum yazarları ve fotoğraflardaki konum/kamera bilgisi. Eklenen fotoğrafların konum bilgisi her zaman silinir
 - **Metin tanıma (OCR):** Taranmış sayfaların metnini tanır ve sayfaya görünmez bir metin katmanı ekler; metin aranabilir, seçilebilir ve kopyalanabilir olur. Türkçe ve İngilizce, tamamen çevrimdışı (Tesseract). Taranmış bir belge açıldığında önerilir; 150 dpi altındaki taramalarda dakikalarca uğraşmak yerine nedenini söyler
 - **Tabloyu Excel'e aktarma:** Tablonun çevresine alan çizip .xlsx olarak kaydedin. Çizgili tablolarda hücreler sayfadaki çizgilerden, çizgisiz tablolarda metnin konumundan bulunur; tutarlar sayıya çevrilir, kodlar ve tarihler metin kalır. Taranmış tablolar metin tanımadan sonra aktarılabilir
-- Sayfayı PNG/JPEG olarak dışa aktarma, boyut küçültme (taranmış belgeleri görüntüye dönüştürerek), yazdırma
+- Sayfayı PNG/JPEG olarak dışa aktarma, sayfanın bir alanını görsel olarak panoya kopyalama, boyut küçültme (taranmış belgeleri görüntüye dönüştürerek), yazdırma
 - Parola korumalı PDF'leri açma
 
 ## Kurulum
@@ -154,6 +158,8 @@ LaserPDF çevrimdışı çalışır. Hesap, reklam ve analitik yoktur, ağ iste�
 | Ctrl+O / Ctrl+S / Ctrl+Shift+S | Aç / Kaydet / Farklı kaydet |
 | Ctrl+P | Yazdır |
 | Ctrl+F | Ara |
+| Ctrl+K | Komut arama |
+| Alt+← / Alt+→ | Geri / İleri |
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
 | Ctrl + / Ctrl − / Ctrl+0 | Yakınlaştır / Uzaklaştır / %100 |
 | Ctrl+Tab, Ctrl+W | Sekmeler arası geçiş, sekmeyi kapat |

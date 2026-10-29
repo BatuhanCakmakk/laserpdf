@@ -1,12 +1,12 @@
 import { DocSession } from "./doc";
 import { Viewer, PageView } from "./viewer";
 import { Interaction } from "./interact";
-import { editor, settings, saveSettings, type Tool } from "./state";
+import { editor, settings, saveSettings, prefs, savePrefs, loadPlace, savePlace, clearPlaces, type Tool, type Prefs } from "./state";
 import { t, lang, setLang, locale, LANGS, type Key, type Lang } from "./i18n";
 import { icon } from "./icons";
 import { h, toast, modal, confirmDialog, promptDialog, showMenu, colorButton, busy, type MenuItem, tooltipText } from "./ui";
 import { PageGrid, renderOutline, clearThumbs } from "./sidebar";
-import { SearchBar } from "./search";
+import { SearchBar, fold, type Hit } from "./search";
 import * as platform from "./platform";
 // pdf-lib and fontkit are only needed when writing files, so load them on demand.
 const exporter = () => import("./export");
@@ -24,14 +24,15 @@ import {
   compressDialog, shortcutsDialog, aboutDialog, logo, uprightBox, formatBytes, namedStampDialog, stampDateTime,
   linkDialog, cropDialog, bookletDialog,
 } from "./dialogs";
-import type { ImageObj, LinkObj, NoteObj, Obj, PageRef, TextObj, FontFamily } from "./model";
-import { displaySize, pageRotation, uid } from "./model";
+import type { ImageObj, LinkObj, NoteObj, Obj, PageRef, ShapeObj, TextObj, FontFamily } from "./model";
+import { displayRect, displaySize, pageRotation, uid } from "./model";
+import type { Fit, Layout } from "./viewer";
 import { linkTarget } from "./objects";
 import { Recovery } from "./recovery";
 import { PasswordCancelled, getTextItems } from "./engine";
 import { ensureFonts } from "./fonts";
 
-export const VERSION = "1.2.1";
+export const VERSION = "1.3.0";
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 interface ToolDef {
@@ -61,6 +62,33 @@ const SHAPES: ToolDef[] = [
 ];
 /** Page width in reading mode when fitting the width: lines stay short enough to read comfortably. */
 const READING_WIDTH = 1000;
+
+/** Toolbar tabs and the commands on each; "|" separates groups. */
+const RIBBON: [string, Key, string[]][] = [
+  ["home", "tab_home", ["select", "hand", "edittext", "text", "|", "highlight", "draw", "note", "|", "signature", "stamp", "whiteout", "|", "organize", "ocr"]],
+  ["comment", "tab_comment", ["highlight", "underline", "strike", "|", "draw", "highlighter", "note", "|", "rect", "ellipse", "line", "arrow", "|", "stamp"]],
+  ["edit", "tab_edit", ["edittext", "text", "image", "signature", "link", "|", "whiteout", "findRedact", "|", "watermark", "pageNumbers"]],
+  ["pages", "tab_pages", ["organize", "insertFile", "insertBlank", "extract", "split", "|", "rotateLeft", "rotateRight", "deletePages", "|", "crop", "booklet"]],
+  ["tools", "tab_tools", ["ocr", "table", "snapshot", "|", "exportImage", "compress", "|", "properties"]],
+  ["view", "tab_view", ["layoutSingle", "layoutDouble", "layoutCover", "|", "fitAuto", "fitWidth", "fitPage", "|", "reading", "presentation", "tone", "sidebar"]],
+];
+
+/** An action of the toolbar, the menus and the command search. */
+interface Cmd {
+  id: string;
+  label: string;
+  /** Name under the icon on the toolbar. */
+  short?: string;
+  icon: string;
+  key?: string;
+  /** The tool it selects, shown as active while it is in use. */
+  tool?: Tool;
+  /** Shown as active while true (layouts, zoom modes). */
+  checked?: () => boolean;
+  /** Works without an open document. */
+  always?: boolean;
+  run: (anchor?: HTMLElement) => void;
+}
 
 const TOOL_KEYS: Record<string, Tool> = {
   v: "select", h: "hand", e: "edittext", t: "text", m: "highlight", u: "underline", k: "strike",
@@ -94,16 +122,21 @@ export class App {
   private sidebarEl = this.root.querySelector<HTMLElement>(".sidebar")!;
   private stageEl = this.root.querySelector<HTMLElement>(".stage")!;
   private welcomeEl = this.root.querySelector<HTMLElement>(".welcome")!;
+  private statusEl = this.root.querySelector<HTMLElement>(".statusbar")!;
+  private statusHint!: HTMLSpanElement;
   private pageInput!: HTMLInputElement;
   private pageTotal!: HTMLSpanElement;
   private zoomLabel!: HTMLButtonElement;
-  private toolButtons = new Map<Tool, HTMLButtonElement>();
-  private shapeBtn!: HTMLButtonElement;
-  private markupBtn!: HTMLButtonElement;
+  private backBtn!: HTMLButtonElement;
+  private forwardBtn!: HTMLButtonElement;
+  private cmds = new Map<string, Cmd>();
+  /** Buttons that show a command's state (active tool, layout, zoom mode). */
+  private cmdButtons: { cmd: Cmd; el: HTMLButtonElement }[] = [];
+  private ribbonEl!: HTMLDivElement;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
-  private openBtn!: HTMLButtonElement;
+  private placeTimer = 0;
   private outlineEl!: HTMLDivElement;
   private organizerEl!: HTMLDivElement;
   private orgCountEl!: HTMLSpanElement;
@@ -111,8 +144,6 @@ export class App {
   private sidebarTab: "pages" | "outline" | "annots" = "pages";
   private annotsEl!: HTMLDivElement;
   private unsub: (() => void) | null = null;
-  private lastShape: Tool = "rect";
-  private lastMarkup: Tool = "highlight";
   private recovery = new Recovery();
   private readingBar!: HTMLDivElement;
   private readingPage!: HTMLSpanElement;
@@ -136,7 +167,7 @@ export class App {
     document.addEventListener(
       "mousedown",
       (e) => {
-        if ((e.target as Element).closest?.(".tool-btn, .icon-btn, .side-tab, .zoom-label, .tab, .tab-add, .split-caret, .seg-btn, .thumb")) e.preventDefault();
+        if ((e.target as Element).closest?.(".tool-btn, .icon-btn, .side-tab, .zoom-label, .tab, .tab-add, .rb-tab, .seg-btn, .thumb")) e.preventDefault();
       },
       true,
     );
@@ -154,6 +185,8 @@ export class App {
         this.zoomLabel.textContent = Math.round(s * 100) + "%";
         this.updateReadingBar();
         this.search?.repaint();
+        this.updateCommandStates();
+        this.schedulePlace();
       },
       wantsTextLayer: () => editor.tool === "select" || editor.tool === "highlight" || editor.tool === "underline" || editor.tool === "strike",
     });
@@ -165,17 +198,26 @@ export class App {
       region: (pv, r, tool) => {
         if (tool === "table") void this.exportTable(pv.ref, r);
         else if (tool === "crop") void this.cropPages(pv.ref, r);
+        else if (tool === "snapshot") void this.copyArea(pv.ref, r);
         else void this.addLink(pv.ref, r);
       },
     });
-    this.search = new SearchBar(this.viewer, this.interaction);
-    this.stageEl.append(this.search.el);
+    this.search = new SearchBar(this.viewer, this.interaction, (hits) => void this.redactHits(hits));
+    this.stageEl.append(this.search.el, this.propbarEl);
+    this.defineCommands();
     this.buildToolbar();
+    this.buildStatusbar();
     this.buildReadingBar();
     this.buildSidebar();
     this.buildOrganizer();
     this.buildWelcome();
+    if (platform.isTauri && platform.isWindows) {
+      void this.checkDefaultApp();
+      // The user may have changed the default in Settings meanwhile.
+      window.addEventListener("focus", () => void this.checkDefaultApp());
+    }
     this.setupKeyboard();
+    this.setupMouseNav();
     this.setupDragDrop();
     this.setupHandTool();
     this.viewer.el.addEventListener("contextmenu", (e) => {
@@ -196,9 +238,11 @@ export class App {
     this.updateAll();
 
     window.addEventListener("beforeunload", (e) => {
+      if (this.active) this.rememberPlace(this.active);
       if (!platform.isTauri && this.docs.some((d) => d.dirty)) e.preventDefault();
     });
     platform.onCloseRequested(async () => {
+      if (this.active) this.rememberPlace(this.active);
       for (const d of [...this.docs]) if (!(await this.confirmClose(d))) return false;
       await this.recovery.forgetAll();
       return true;
@@ -225,7 +269,73 @@ export class App {
     if (!ref) return;
     // Only offset into the page for unrotated pages, where PDF y maps directly.
     const off = top != null && (ref.baseRot + ref.rot) % 360 === 0 ? Math.max(0, (ref.vy + ref.h - top) * this.viewer.scale) : 0;
-    this.viewer.scrollToPage(i, false, off);
+    this.jump(() => this.viewer.scrollToPage(i, false, off));
+  }
+
+  // -------------------------------------------------------------- history
+
+  /** Moves elsewhere in the document and remembers where it was, for Back (Alt+←). */
+  private jump(go: () => void): void {
+    const doc = this.active;
+    const from = this.viewer.position();
+    go();
+    const to = this.viewer.position();
+    if (!doc || !from || !to || from.page === to.page) return;
+    doc.history.back.push(from);
+    if (doc.history.back.length > 100) doc.history.back.shift();
+    doc.history.forward = [];
+    this.updateNav();
+  }
+
+  /** Back (-1) or Forward (1) through the places jumped from. */
+  private goHistory(dir: -1 | 1): void {
+    const doc = this.active;
+    if (!doc) return;
+    const from = dir < 0 ? doc.history.back : doc.history.forward;
+    const to = dir < 0 ? doc.history.forward : doc.history.back;
+    let pos = from.pop();
+    // Places on deleted pages are skipped.
+    while (pos && !doc.page(pos.page)) pos = from.pop();
+    const here = this.viewer.position();
+    if (pos) {
+      if (here) to.push(here);
+      this.viewer.restore(pos);
+    }
+    this.updateNav();
+  }
+
+  private updateNav(): void {
+    if (!this.backBtn) return;
+    this.backBtn.disabled = !this.active?.history.back.length;
+    this.forwardBtn.disabled = !this.active?.history.forward.length;
+  }
+
+  // --------------------------------------------------------------- places
+
+  /** Saves where a file is being read, to reopen it there next time. */
+  private rememberPlace(doc: DocSession): void {
+    if (!doc.path || doc !== this.active) return;
+    const pos = this.viewer.position();
+    const page = pos ? doc.pages.findIndex((p) => p.id === pos.page) : -1;
+    if (!pos || page < 0) return;
+    savePlace(doc.path, { page, off: pos.off, scale: this.viewer.scale, fit: this.viewer.fit, layout: this.viewer.layout, time: Date.now() });
+  }
+
+  private schedulePlace(): void {
+    clearTimeout(this.placeTimer);
+    this.placeTimer = window.setTimeout(() => this.active && this.rememberPlace(this.active), 1500);
+  }
+
+  /** How a newly opened document is shown: the default zoom and layout, or where it was left. */
+  private prepareView(doc: DocSession): number {
+    doc.view.fit = prefs.zoom === "100" ? null : prefs.zoom;
+    doc.view.layout = prefs.layout;
+    const place = prefs.resume && doc.path ? loadPlace(doc.path) : null;
+    const ref = place ? doc.pages[place.page] : undefined;
+    if (!place || !ref) return 0;
+    doc.view.layout = place.layout;
+    doc.view.resume = { pos: { page: ref.id, off: place.off }, scale: place.scale, fit: place.fit };
+    return place.page;
   }
 
   private outlineHost = {
@@ -305,7 +415,9 @@ export class App {
     });
     const helpBtn = h("button", { class: "icon-btn", title: t("shortcuts") }, icon("keyboard"));
     helpBtn.addEventListener("click", () => shortcutsDialog());
-    actions.replaceChildren(langBtn, themeBtn, helpBtn);
+    const settingsBtn = h("button", { class: "icon-btn", title: t("settings") }, icon("settings"));
+    settingsBtn.addEventListener("click", () => this.settingsDialog());
+    actions.replaceChildren(langBtn, themeBtn, helpBtn, settingsBtn);
   }
 
   private switchLang(l: Lang): void {
@@ -313,11 +425,13 @@ export class App {
     setLang(l);
     // Rebuild every piece of UI chrome with the new strings.
     this.buildTitlebar();
+    this.defineCommands();
     this.buildToolbar();
+    this.buildStatusbar();
     this.buildSidebar();
     this.buildWelcome();
     this.organizerEl.firstElementChild!.replaceWith(this.buildOrganizerBar());
-    const search = new SearchBar(this.viewer, this.interaction);
+    const search = new SearchBar(this.viewer, this.interaction, (hits) => void this.redactHits(hits));
     this.search.el.replaceWith(search.el);
     this.search = search;
     this.updateAll();
@@ -372,108 +486,187 @@ export class App {
     return b;
   }
 
-  private toolBtn(d: ToolDef): HTMLButtonElement {
-    const b = this.btn(d.icon, t(`tool_${d.tool}` as Key), () => this.setTool(d.tool), d.key, t(`tb_${d.tool}` as Key));
-    this.toolButtons.set(d.tool, b);
+  /** Defines every command once; the toolbar tabs, menus and command search use them by id. */
+  private defineCommands(): void {
+    const m = (this.cmds = new Map<string, Cmd>());
+    const add = (c: Cmd) => m.set(c.id, c);
+    const doc = () => this.active!;
+    const tools: ToolDef[] = [...TOOLS, ...MARKUP, ...SHAPES, { tool: "whiteout", icon: "whiteout", key: "W" }, { tool: "note", icon: "note", key: "N" }, { tool: "link", icon: "link" }];
+    for (const d of tools) add({ id: d.tool, label: t(`tool_${d.tool}` as Key), short: t(`tb_${d.tool}` as Key), icon: d.icon, key: d.key, tool: d.tool, run: () => this.setTool(d.tool) });
+    add({ id: "table", label: t("tableToExcel"), short: t("tb_table"), icon: "xlsx", tool: "table", run: () => this.setTool("table") });
+    add({ id: "crop", label: t("crop"), short: t("tb_crop"), icon: "crop", tool: "crop", run: () => this.setTool("crop") });
+    add({ id: "snapshot", label: t("snapshot"), short: t("tb_snapshot"), icon: "snapshot", tool: "snapshot", run: () => this.setTool("snapshot") });
+
+    add({ id: "open", label: t("open"), short: t("tb_open"), icon: "open", key: `${MOD}+O`, always: true, run: () => this.openDialog() });
+    add({ id: "save", label: t("save"), short: t("tb_save"), icon: "save", key: `${MOD}+S`, run: () => this.save() });
+    add({ id: "saveAs", label: t("saveAs"), icon: "saveAs", key: `${MOD}+Shift+S`, run: () => this.save(true) });
+    add({ id: "print", label: t("print"), short: t("tb_print"), icon: "print", key: `${MOD}+P`, run: () => this.print() });
+    add({ id: "undo", label: t("undo"), short: t("tb_undo"), icon: "undo", key: `${MOD}+Z`, run: () => this.undo() });
+    add({ id: "redo", label: t("redo"), short: t("tb_redo"), icon: "redo", key: `${MOD}+Y`, run: () => this.redo() });
+    add({ id: "search", label: t("search"), short: t("tb_search"), icon: "search", key: `${MOD}+F`, run: () => this.search.open() });
+    add({ id: "closeTab", label: t("closeTab"), icon: "x", key: `${MOD}+W`, run: () => this.closeDoc(doc()) });
+    add({ id: "newBlank", label: t("newBlank"), icon: "filePlus", always: true, run: () => this.newBlank() });
+    add({ id: "mergePdfs", label: t("mergePdfs"), icon: "merge", always: true, run: () => this.mergeNew() });
+    add({ id: "imagesToPdf", label: t("imagesToPdf"), icon: "images", always: true, run: () => this.imagesToPdfNew() });
+
+    add({ id: "image", label: t("addImage"), short: t("tb_image"), icon: "image", run: () => this.addImage() });
+    add({ id: "signature", label: t("signature"), short: t("tb_sign"), icon: "signature", run: () => this.addSignature() });
+    add({ id: "stamp", label: t("stamp"), short: t("tb_stamp"), icon: "stamp", run: (a) => this.stampMenu(a) });
+    add({ id: "findRedact", label: t("findRedact"), short: t("tb_findRedact"), icon: "findRedact", run: () => {
+      this.search.open();
+      toast(t("findRedactHint"), "info", 6000);
+    } });
+    add({ id: "watermark", label: t("watermark"), short: t("tb_watermark"), icon: "watermark", run: () => watermarkDialog(doc(), this.grid.selected(), (o) => this.interaction.measureText(o)) });
+    add({ id: "pageNumbers", label: t("pageNumbers"), short: t("tb_pageNumbers"), icon: "hash", run: () => pageNumbersDialog(doc(), this.grid.selected(), (o) => this.interaction.measureText(o)) });
+
+    add({ id: "organize", label: t("organize"), short: t("tb_pages"), icon: "grid", run: () => this.openOrganizer() });
+    add({ id: "insertFile", label: t("insertFromFile"), short: t("tb_insert"), icon: "merge", run: () => this.insertFromFile(doc().pages.length) });
+    add({ id: "insertBlank", label: t("insertBlank"), short: t("tb_blank"), icon: "blankPage", run: () => this.insertBlankPages() });
+    add({ id: "extract", label: t("extractPages"), short: t("tb_extract"), icon: "extract", run: () => this.extractPages(this.selectedPages()) });
+    add({ id: "split", label: t("splitDoc"), short: t("tb_split"), icon: "split", run: () => this.splitDocument() });
+    add({ id: "rotateLeft", label: t("rotateLeft"), short: t("tb_rotateLeft"), icon: "rotateCcw", run: () => this.rotateSel(-90) });
+    add({ id: "rotateRight", label: t("rotateRight"), short: t("tb_rotateRight"), icon: "rotateCw", run: () => this.rotateSel(90) });
+    add({ id: "deletePages", label: t("deletePages"), short: t("tb_delete"), icon: "trash", run: () => this.deletePagesConfirm(this.selectedPages()) });
+    add({ id: "booklet", label: t("booklet"), short: t("tb_booklet"), icon: "booklet", run: () => this.makeBooklet() });
+    add({ id: "flatten", label: t("flattenPages"), icon: "lock", run: () => this.flattenPages(this.selectedPages()) });
+
+    add({ id: "ocr", label: t("ocr"), short: t("tb_ocr"), icon: "ocr", run: () => this.recognizeText(doc().pages.map((p) => p.id)) });
+    add({ id: "exportImage", label: t("exportImage"), short: t("tb_exportImage"), icon: "fileImage", run: () => this.exportImage() });
+    add({ id: "compress", label: t("compress"), short: t("tb_compress"), icon: "compress", run: () => this.compress() });
+    add({ id: "properties", label: t("properties"), short: t("tb_properties"), icon: "info", run: () => propertiesDialog(doc()) });
+
+    const layout = (id: string, l: Layout, k: Key, short: Key, ic: string) =>
+      add({ id, label: t(k), short: t(short), icon: ic, checked: () => this.viewer.layout === l, run: () => this.setLayout(l) });
+    layout("layoutSingle", "single", "layoutSingle", "tb_single", "single");
+    layout("layoutDouble", "double", "layoutDouble", "tb_double", "double");
+    layout("layoutCover", "cover", "layoutCover", "tb_cover", "cover");
+    add({ id: "fitAuto", label: t("fitAuto"), short: t("tb_fitAuto"), icon: "fitAuto", checked: () => this.viewer.fit === "auto", run: () => this.viewer.setFit("auto") });
+    add({ id: "fitWidth", label: t("fitWidth"), short: t("tb_fitWidth"), icon: "fitWidth", checked: () => this.viewer.fit === "width", run: () => this.viewer.setFit("width") });
+    add({ id: "fitPage", label: t("fitPage"), short: t("tb_fitPage"), icon: "fitPage", checked: () => this.viewer.fit === "page", run: () => this.viewer.setFit("page") });
+    add({ id: "actualSize", label: t("actualSize"), icon: "zoomIn", key: `${MOD}+0`, run: () => this.viewer.zoomTo(1) });
+    add({ id: "zoomIn", label: t("zoomIn"), icon: "zoomIn", key: `${MOD}++`, run: () => this.zoomStep(1) });
+    add({ id: "zoomOut", label: t("zoomOut"), icon: "zoomOut", key: `${MOD}+−`, run: () => this.zoomStep(-1) });
+    add({ id: "reading", label: t("readingMode"), short: t("tb_reading"), icon: "reading", key: `${MOD}+H`, run: () => this.toggleReading(true) });
+    add({ id: "presentation", label: t("presentation"), short: t("tb_present"), icon: "monitor", key: "F5", run: () => this.togglePresentation(true) });
+    add({ id: "tone", label: t("pageTone"), short: t("tb_tone"), icon: "palette", run: (a) => this.toneMenu(a) });
+    add({ id: "sidebar", label: t("toggleSidebar"), short: t("tb_sidebar"), icon: "panel", checked: () => !this.root.classList.contains("no-sidebar"), run: () => this.toggleSidebar() });
+
+    add({ id: "prevPage", label: t("prevPage"), icon: "up", key: "PgUp", run: () => this.viewer.stepPage(-1) });
+    add({ id: "nextPage", label: t("nextPage"), icon: "down", key: "PgDn", run: () => this.viewer.stepPage(1) });
+    add({ id: "firstPage", label: t("firstPage"), icon: "arrowUp", key: "Home", run: () => this.jump(() => this.viewer.scrollToPage(0)) });
+    add({ id: "lastPage", label: t("lastPage"), icon: "arrowDown", key: "End", run: () => this.jump(() => this.viewer.scrollToPage(doc().pages.length - 1)) });
+    add({ id: "goBack", label: t("goBack"), icon: "navBack", key: "Alt+←", run: () => this.goHistory(-1) });
+    add({ id: "goForward", label: t("goForward"), icon: "navForward", key: "Alt+→", run: () => this.goHistory(1) });
+
+    add({ id: "commands", label: t("commandSearch"), icon: "command", key: `${MOD}+K`, always: true, run: () => this.commandPalette() });
+    add({ id: "settings", label: t("settings"), icon: "settings", always: true, run: () => this.settingsDialog() });
+    add({ id: "shortcuts", label: t("shortcuts"), icon: "keyboard", always: true, run: () => shortcutsDialog() });
+    add({ id: "about", label: t("about"), icon: "file", always: true, run: () => aboutDialog(VERSION) });
+  }
+
+  private cmd(id: string): Cmd {
+    const c = this.cmds.get(id);
+    if (!c) throw new Error(`no command ${id}`);
+    return c;
+  }
+
+  /** A toolbar button for a command; `labeled` adds its short name under the icon. */
+  private cmdBtn(id: string, labeled = true): HTMLButtonElement {
+    const c = this.cmd(id);
+    const b: HTMLButtonElement = this.btn(c.icon, c.label, () => c.run(b), c.key, labeled ? c.short : undefined);
+    b.dataset.cmd = id;
+    this.cmdButtons.push({ cmd: c, el: b });
     return b;
   }
 
-  /** When the toolbar does not fit: tighter spacing, then no labels, then no page tools (also in the More menu). */
+  /** When the toolbar does not fit: tighter spacing, then no labels. */
   private fitToolbar(): void {
     const el = this.toolbarEl;
     this.toolbarWidth = el.clientWidth;
     this.toolbarObserver.observe(el);
-    el.classList.remove("tight", "compact", "no-doc-tools");
-    const overflows = () => el.scrollWidth > el.clientWidth + 1;
-    for (const step of ["tight", "compact", "no-doc-tools"]) if (overflows()) el.classList.add(step);
+    el.classList.remove("tight", "compact");
+    const rows = [...el.querySelectorAll<HTMLElement>(".tb-row")];
+    const overflows = () => rows.some((r) => r.scrollWidth > r.clientWidth + 1);
+    for (const step of ["tight", "compact"]) if (overflows()) el.classList.add(step);
   }
 
+  /** Two rows: tabs with the always-needed actions, and the tools of the chosen tab. */
   private buildToolbar(): void {
-    this.toolButtons.clear();
-    const open = (this.openBtn = this.btn("open", t("open"), () => this.openDialog(), `${MOD}+O`, t("tb_open")));
-    this.saveBtn = this.btn("save", t("save"), () => this.save(), `${MOD}+S`, t("tb_save"));
-    const print = this.btn("print", t("print"), () => this.print(), `${MOD}+P`, t("tb_print"));
-    this.undoBtn = this.btn("undo", t("undo"), () => this.undo(), `${MOD}+Z`, t("tb_undo"));
-    this.redoBtn = this.btn("redo", t("redo"), () => this.redo(), `${MOD}+Y`, t("tb_redo"));
-
-    // Markup and shape groups remember the last used variant.
-    const groupBtn = (defs: ToolDef[], getLast: () => Tool, setLast: (t: Tool) => void, label: string, short: string) => {
-      const main = h("button", { class: "tool-btn labeled split-main" });
-      const caret = h("button", { class: "tool-btn split-caret", title: label }, icon("down", 12));
-      const paint = () => {
-        const d = defs.find((x) => x.tool === getLast())!;
-        main.replaceChildren(icon(d.icon, 20), h("span", { class: "tb-label" }, short));
-        main.title = tooltipText(t(`tool_${d.tool}` as Key), d.key);
-      };
-      paint();
-      main.addEventListener("click", () => this.setTool(getLast()));
-      caret.addEventListener("click", () =>
-        showMenu(
-          defs.map((d) => ({
-            label: t(`tool_${d.tool}` as Key),
-            icon: d.icon,
-            shortcut: d.key,
-            action: () => {
-              setLast(d.tool);
-              paint();
-              this.setTool(d.tool);
-            },
-          })),
-          0, 0, caret,
-        ),
-      );
-      const wrap = h("div", { class: "split" }, main, caret);
-      return { wrap, main, paint };
-    };
-    const markup = groupBtn(MARKUP, () => this.lastMarkup, (x) => (this.lastMarkup = x), t("tool_highlight"), t("tb_markup"));
-    const shapes = groupBtn(SHAPES, () => this.lastShape, (x) => (this.lastShape = x), t("shapes"), t("tb_shapes"));
-    this.markupBtn = markup.main;
-    this.shapeBtn = shapes.main;
-    (this.markupBtn as HTMLButtonElement & { paint?: () => void }).paint = markup.paint;
-    (this.shapeBtn as HTMLButtonElement & { paint?: () => void }).paint = shapes.paint;
-
-    const image = this.btn("image", t("addImage"), () => this.addImage(), undefined, t("tb_image"));
-    const sign = this.btn("signature", t("signature"), () => this.addSignature(), undefined, t("tb_sign"));
-    const stamp = this.btn("stamp", t("stamp"), () => this.stampMenu(stamp), undefined, t("tb_stamp"));
-    const link = this.toolBtn({ tool: "link", icon: "link" });
-    const whiteout = this.toolBtn({ tool: "whiteout", icon: "whiteout", key: "W" });
-    const note = this.toolBtn({ tool: "note", icon: "note", key: "N" });
-
-    const tableBtn = this.btn("xlsx", t("tableToExcel"), () => this.setTool("table"), undefined, t("tb_table"));
-    this.toolButtons.set("table", tableBtn);
-    // Frequent page tools, also listed in the More menu.
-    const docTools = h("div", { class: "tb-group tb-doc-tools" },
-      this.btn("grid", t("organize"), () => this.openOrganizer(), undefined, t("tb_pages")),
-      this.btn("merge", t("insertFromFile"), () => this.active && this.insertFromFile(this.active.pages.length), undefined, t("tb_merge")),
-      this.btn("split", t("splitDoc"), () => this.splitDocument(), undefined, t("tb_split")),
-      this.btn("compress", t("compress"), () => this.compress(), undefined, t("tb_compress")),
-      this.btn("hash", t("pageNumbers"), () => this.active && pageNumbersDialog(this.active, this.grid.selected(), (o) => this.interaction.measureText(o)), undefined, t("tb_pageNumbers")),
-      this.btn("ocr", t("ocr"), () => this.active && this.recognizeText(this.active.pages.map((p) => p.id)), undefined, t("tb_ocr")),
-      tableBtn,
+    this.cmdButtons = [];
+    const group = (...els: HTMLElement[]) => h("div", { class: "tb-group" }, ...els);
+    this.saveBtn = this.cmdBtn("save", false);
+    this.undoBtn = this.cmdBtn("undo", false);
+    this.redoBtn = this.cmdBtn("redo", false);
+    if (!RIBBON.some(([id]) => id === prefs.tab)) prefs.tab = "home";
+    const tabs = h("div", { class: "rb-tabs", role: "tablist" },
+      ...RIBBON.map(([id, k]) => {
+        const b = h("button", { class: `rb-tab ${prefs.tab === id ? "active" : ""}`, role: "tab", "aria-selected": String(prefs.tab === id), "data-tab": id }, t(k));
+        b.addEventListener("click", () => {
+          prefs.tab = id;
+          savePrefs();
+          tabs.querySelectorAll(".rb-tab").forEach((x) => {
+            x.classList.toggle("active", x === b);
+            x.setAttribute("aria-selected", String(x === b));
+          });
+          this.buildRibbon();
+        });
+        return b;
+      }),
     );
+    const more = this.btn("more", t("more"), () => this.moreMenu(more));
+    const top = h("div", { class: "tb-row tb-top" },
+      group(this.cmdBtn("sidebar", false), this.cmdBtn("open", false), this.saveBtn, this.cmdBtn("print", false)),
+      group(this.undoBtn, this.redoBtn),
+      tabs,
+      h("div", { class: "tb-spacer" }),
+      group(this.cmdBtn("search", false), this.cmdBtn("commands", false), more),
+    );
+    this.ribbonEl = h("div", { class: "tb-row ribbon", role: "toolbar" });
+    this.toolbarEl.replaceChildren(top, this.ribbonEl);
+    this.buildRibbon();
+  }
 
-    // Navigation & zoom
+  private buildRibbon(): void {
+    this.cmdButtons = this.cmdButtons.filter((x) => !this.ribbonEl.contains(x.el));
+    const ids = RIBBON.find(([id]) => id === prefs.tab)![2];
+    const groups: HTMLElement[][] = [[]];
+    for (const id of ids) {
+      if (id === "|") groups.push([]);
+      else groups.at(-1)!.push(this.cmdBtn(id));
+    }
+    this.ribbonEl.replaceChildren(...groups.map((g) => h("div", { class: "tb-group" }, ...g)));
+    this.updateToolbar();
+    this.fitToolbar();
+  }
+
+  /** Page position, layout and zoom at the bottom of the window, with the current tool's hint. */
+  private buildStatusbar(): void {
+    const small = (b: HTMLButtonElement) => {
+      b.classList.add("small");
+      return b;
+    };
+    this.statusHint = h("span", { class: "st-hint" });
+    this.backBtn = small(this.cmdBtn("goBack", false));
+    this.forwardBtn = small(this.cmdBtn("goForward", false));
     this.pageInput = h("input", { class: "page-input", value: "0", "aria-label": t("page") });
     this.pageTotal = h("span", { class: "page-total" }, "/ 0");
     this.pageInput.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") {
         const n = parseInt(this.pageInput.value, 10);
-        if (n > 0) this.viewer.scrollToPage(n - 1);
+        if (n > 0) this.jump(() => this.viewer.scrollToPage(n - 1));
         this.viewer.el.focus({ preventScroll: true });
       }
     });
     this.pageInput.addEventListener("focus", () => this.pageInput.select());
-    const prev = this.btn("up", t("prevPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex - 1), "PgUp");
-    const next = this.btn("down", t("nextPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex + 1), "PgDn");
-    const zoomOut = this.btn("zoomOut", t("zoomOut"), () => this.zoomStep(-1), `${MOD}+−`);
-    const zoomIn = this.btn("zoomIn", t("zoomIn"), () => this.zoomStep(1), `${MOD}++`);
-    this.zoomLabel = h("button", { class: "zoom-label", title: t("zoomIn") }, "100%");
+    this.zoomLabel = h("button", { class: "zoom-label", title: t("zoom") }, "100%");
     this.zoomLabel.addEventListener("click", () =>
       showMenu(
         [
-          { label: t("fitWidth"), icon: "fitWidth", action: () => this.viewer.setFit("width") },
-          { label: t("fitPage"), icon: "fitPage", action: () => this.viewer.setFit("page") },
+          ...["fitAuto", "fitWidth", "fitPage"].map((id) => {
+            const c = this.cmd(id);
+            return { label: c.label, checked: c.checked!(), action: () => c.run() };
+          }),
           { label: t("actualSize"), shortcut: `${MOD}+0`, action: () => this.viewer.zoomTo(1) },
           { separator: true },
           ...[0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map((z) => ({ label: `${z * 100}%`, action: () => this.viewer.zoomTo(z) })),
@@ -481,54 +674,47 @@ export class App {
         0, 0, this.zoomLabel,
       ),
     );
-    const searchBtn = this.btn("search", t("search"), () => this.search.open(), `${MOD}+F`, t("tb_search"));
-    const more = this.btn("more", t("more"), () => this.moreMenu(more), undefined, t("tb_more"));
-    const read = this.btn("reading", t("readingMode"), () => this.toggleReading(true), `${MOD}+H`, t("tb_reading"));
-
-    const sideToggle = this.btn("panel", t("toggleSidebar"), () => this.toggleSidebar(), undefined, t("tb_sidebar"));
-    const group = (...els: HTMLElement[]) => h("div", { class: "tb-group" }, ...els);
-    this.toolbarEl.replaceChildren(
-      group(sideToggle, open, this.saveBtn, print),
-      group(this.undoBtn, this.redoBtn),
-      group(...TOOLS.map((d) => this.toolBtn(d))),
-      group(markup.wrap, shapes.wrap, whiteout, note),
-      group(image, sign, stamp, link),
-      docTools,
+    const group = (...els: HTMLElement[]) => h("div", { class: "st-group" }, ...els);
+    this.statusEl.replaceChildren(
+      this.statusHint,
       h("div", { class: "tb-spacer" }),
-      group(prev, h("div", { class: "page-nav" }, this.pageInput, this.pageTotal), next),
-      group(zoomOut, this.zoomLabel, zoomIn),
-      group(read, searchBtn, more),
+      group(this.backBtn, this.forwardBtn),
+      group(small(this.cmdBtn("layoutSingle", false)), small(this.cmdBtn("layoutDouble", false)), small(this.cmdBtn("layoutCover", false))),
+      group(small(this.cmdBtn("prevPage", false)), h("div", { class: "page-nav" }, this.pageInput, this.pageTotal), small(this.cmdBtn("nextPage", false))),
+      group(small(this.cmdBtn("zoomOut", false)), this.zoomLabel, small(this.cmdBtn("zoomIn", false))),
     );
-    this.updateToolbar();
-    this.fitToolbar();
+    this.updateNav();
   }
 
   private updateToolbar(): void {
-    const doc = this.active;
-    const has = !!doc;
-    this.toolbarEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) => (b.disabled = !has));
-    this.openBtn.disabled = false;
-    this.pageInput.disabled = !has;
+    const has = !!this.active;
+    for (const { cmd, el } of this.cmdButtons) el.disabled = !has && !cmd.always;
+    this.toolbarEl.querySelectorAll<HTMLButtonElement>(".tb-top > .tb-group > button:not([data-cmd])").forEach((b) => (b.disabled = !has));
     if (has) {
-      this.undoBtn.disabled = !doc.canUndo;
-      this.redoBtn.disabled = !doc.canRedo;
+      this.undoBtn.disabled = !this.active!.canUndo;
+      this.redoBtn.disabled = !this.active!.canRedo;
     }
-    for (const [tool, b] of this.toolButtons) b.classList.toggle("active", editor.tool === tool);
-    this.markupBtn.classList.toggle("active", MARKUP.some((d) => d.tool === editor.tool));
-    this.shapeBtn.classList.toggle("active", SHAPES.some((d) => d.tool === editor.tool));
+    this.updateCommandStates();
+    this.updateNav();
     this.stageEl.dataset.tool = editor.tool;
+  }
+
+  /** Marks the active tool, layout and zoom mode. */
+  private updateCommandStates(): void {
+    for (const { cmd, el } of this.cmdButtons) {
+      const on = cmd.tool ? editor.tool === cmd.tool : cmd.checked ? !!this.active && cmd.checked() : false;
+      el.classList.toggle("active", on);
+    }
+  }
+
+  private setLayout(l: Layout): void {
+    this.viewer.setLayout(l);
+    this.updateCommandStates();
+    this.schedulePlace();
   }
 
   setTool(tool: Tool): void {
     if (!this.active) return;
-    if (MARKUP.some((d) => d.tool === tool)) {
-      this.lastMarkup = tool;
-      (this.markupBtn as HTMLButtonElement & { paint?: () => void }).paint?.();
-    }
-    if (SHAPES.some((d) => d.tool === tool)) {
-      this.lastShape = tool;
-      (this.shapeBtn as HTMLButtonElement & { paint?: () => void }).paint?.();
-    }
     this.interaction.finishEdit();
     const hadText = this.viewer.pageViews.length > 0;
     editor.setTool(tool);
@@ -545,7 +731,7 @@ export class App {
       bar.classList.remove("show");
       return;
     }
-    bar.classList.add("show");
+    let hintText = "";
     const sel = editor.selected ? doc.obj(editor.selected) : undefined;
     const tool = editor.tool;
     const items: (HTMLElement | null)[] = [];
@@ -691,7 +877,7 @@ export class App {
         this.btn("trash", t("delete"), () => this.interaction.deleteSelected(), "Del"),
       );
     } else {
-      const hint = (k: Key) => items.push(h("span", { class: "prop-hint" }, icon("info", 15), t(k)));
+      const hint = (k: Key) => (hintText = t(k));
       switch (tool) {
         case "text":
           textControls(null);
@@ -752,6 +938,9 @@ export class App {
         case "link":
           hint("linkHint");
           break;
+        case "snapshot":
+          hint("snapshotHint");
+          break;
         case "note":
           items.push(colorButton({ value: settings.noteColor, title: t("color"), onChange: (c) => { settings.noteColor = c!; saveSettings(); } }));
           hint("noteHint");
@@ -766,7 +955,12 @@ export class App {
           hint("selectHint");
       }
     }
-    bar.replaceChildren(...items.filter((x): x is HTMLElement => !!x));
+    const shown = items.filter((x): x is HTMLElement => !!x);
+    // A trailing separator before the (now absent) hint is dropped.
+    while (shown.at(-1)?.classList.contains("prop-sep")) shown.pop();
+    bar.replaceChildren(...shown);
+    bar.classList.toggle("show", shown.length > 0);
+    this.statusHint.textContent = hintText;
   }
 
   // -------------------------------------------------------------- sidebar
@@ -784,7 +978,7 @@ export class App {
     };
     if (!this.grid) {
       this.grid = new PageGrid({
-        goTo: (i) => this.viewer.scrollToPage(i),
+        goTo: (i) => this.jump(() => this.viewer.scrollToPage(i)),
         pageMenu: (ids, x, y) => this.pageMenu(ids, x, y),
       }, 132, "sidebar-grid");
       this.grid.el.addEventListener("deleteselected", () => this.deletePagesConfirm(this.grid.selected()));
@@ -831,7 +1025,7 @@ export class App {
             );
             item.addEventListener("click", () => {
               this.setTool("select");
-              this.viewer.scrollToRect(o.page, o.x, o.y, o.w, o.h);
+              this.jump(() => this.viewer.scrollToRect(o.page, o.x, o.y, o.w, o.h));
               editor.select(o.id);
             });
             item.addEventListener("dblclick", () => {
@@ -885,9 +1079,9 @@ export class App {
     );
     this.readingFullBtn = b("expand", t("fullscreen"), () => this.setReadingFull(!this.readingFull));
     this.readingBar = h("div", { class: "reading-bar", role: "toolbar", "aria-label": t("readingMode") },
-      b("left", t("prevPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex - 1), "←"),
+      b("left", t("prevPage"), () => this.viewer.stepPage(-1), "←"),
       this.readingPage,
-      b("right", t("nextPage"), () => this.viewer.scrollToPage(this.viewer.currentIndex + 1), "→"),
+      b("right", t("nextPage"), () => this.viewer.stepPage(1), "→"),
       sep(),
       b("zoomOut", t("zoomOut"), () => this.zoomStep(-1), `${MOD}+−`),
       this.readingZoom,
@@ -956,16 +1150,22 @@ export class App {
     }
   }
 
+  private beforePresenting: { fit: Fit | null; scale: number } | null = null;
+  /** Whether .pdf already opens in LaserPDF; null until Windows has been asked (and off Windows). */
+  private isDefaultApp: boolean | null = null;
+
   private togglePresentation(on = !this.root.classList.contains("presenting")): void {
-    if (!this.active) return;
+    if (!this.active || on === this.root.classList.contains("presenting")) return;
     this.root.classList.toggle("presenting", on);
     platform.setFullscreen(on);
     if (on) {
+      this.beforePresenting = { fit: this.viewer.fit, scale: this.viewer.scale };
       this.setTool("hand");
       requestAnimationFrame(() => this.viewer.setFit("page"));
     } else {
       this.setTool("select");
-      requestAnimationFrame(() => this.viewer.setFit("width"));
+      const prev = this.beforePresenting;
+      requestAnimationFrame(() => (prev?.fit ? this.viewer.setFit(prev.fit) : this.viewer.zoomTo(prev?.scale ?? 1)));
     }
   }
 
@@ -976,6 +1176,7 @@ export class App {
     } catch {
       /* ignore */
     }
+    this.updateCommandStates();
   }
 
   private selectedPages(): string[] {
@@ -1070,7 +1271,7 @@ export class App {
       pageMenu: (ids, x, y) => this.pageMenu(ids, x, y),
       activate: (i) => {
         this.closeOrganizer();
-        this.viewer.scrollToPage(i);
+        this.jump(() => this.viewer.scrollToPage(i));
       },
     }, this.orgWidth, "organizer");
     this.organizer.el.addEventListener("deleteselected", () => this.deletePagesConfirm(this.organizer.selected()));
@@ -1166,6 +1367,17 @@ export class App {
           action("filePlus", "newBlank", () => this.newBlank()),
         ),
         h("div", { class: "drop-zone", onclick: () => this.openDialog() }, icon("upload", 28), h("span", {}, t("dropHere"))),
+        this.isDefaultApp === false && !prefs.defaultAppHidden
+          ? h("div", { class: "default-app" },
+              icon("info", 16),
+              h("span", {}, t("defaultAppHint")),
+              h("button", { class: "link-btn", onclick: () => this.makeDefaultApp() }, t("defaultAppButton")),
+              h("button", { class: "icon-btn small", title: t("close"), onclick: () => {
+                prefs.defaultAppHidden = true;
+                savePrefs();
+                this.buildWelcome();
+              } }, icon("x", 14)))
+          : null,
         platform.isTauri
           ? h("div", { class: "recent" },
               h("div", { class: "recent-head" }, h("h3", {}, t("recent")),
@@ -1280,13 +1492,16 @@ export class App {
   }
 
   private addDoc(doc: DocSession): void {
+    const page = this.prepareView(doc);
     this.docs.push(doc);
     this.activate(doc);
+    if (page > 0) toast(t("resumed", { n: page + 1 }), "info", 5000, { label: t("resumeStart"), run: () => this.jump(() => this.viewer.scrollToPage(0)) });
   }
 
   activate(doc: DocSession | null): void {
     if (this.active === doc) return;
     this.interaction.finishEdit();
+    if (this.active) this.rememberPlace(this.active);
     this.viewer.saveViewState();
     this.unsub?.();
     this.unsub = null;
@@ -1352,6 +1567,7 @@ export class App {
       this.pageTotal.textContent = "/ 0";
       this.pageInput.value = "";
     }
+    this.updateNav();
     platform.setWindowTitle(doc ? `${doc.dirty ? "• " : ""}${doc.name} — LaserPDF` : "LaserPDF");
   }
 
@@ -1359,6 +1575,7 @@ export class App {
     if (document.activeElement !== this.pageInput) this.pageInput.value = String(i + 1);
     this.grid?.setCurrent(i);
     this.updateReadingBar();
+    this.schedulePlace();
   }
 
   private async confirmClose(doc: DocSession): Promise<boolean> {
@@ -1381,6 +1598,7 @@ export class App {
 
   async closeDoc(doc: DocSession): Promise<void> {
     if (!(await this.confirmClose(doc))) return;
+    this.rememberPlace(doc);
     const i = this.docs.indexOf(doc);
     this.docs.splice(i, 1);
     if (this.active === doc) {
@@ -1879,7 +2097,7 @@ export class App {
     if (png) await this.placeImage(png, 170);
   }
 
-  private stampMenu(anchor: HTMLElement): void {
+  private stampMenu(anchor?: HTMLElement): void {
     const make = (text: string, color: string) => () => this.placeStamp(text, color);
     const date = stampDateTime(true, false);
     const dateTime = stampDateTime(true, true);
@@ -1910,8 +2128,14 @@ export class App {
           },
         },
       ],
-      0, 0, anchor,
+      innerWidth / 2 - 120, innerHeight / 3, anchor,
     );
+  }
+
+  private toneMenu(anchor?: HTMLElement): void {
+    const tones = ["normal", "sepia", "night"] as const;
+    const key = { normal: "toneNormal", sepia: "toneSepia", night: "toneNight" } as const;
+    showMenu(tones.map((k) => ({ label: t(key[k]), checked: this.tone === k, action: () => this.setTone(k) })), innerWidth / 2 - 100, innerHeight / 3, anchor);
   }
 
   private async placeStamp(text: string, color: string, size = 20): Promise<void> {
@@ -2012,37 +2236,240 @@ export class App {
   // ------------------------------------------------------------ more menu
 
   private moreMenu(anchor: HTMLElement): void {
-    const doc = this.active;
-    if (!doc) return;
-    const measure = (o: TextObj) => this.interaction.measureText(o);
+    const item = (id: string) => {
+      const c = this.cmd(id);
+      return { label: c.label, icon: c.icon, shortcut: c.key, disabled: !this.active && !c.always, action: () => c.run() };
+    };
     showMenu(
       [
-        { label: t("saveAs"), icon: "saveAs", shortcut: `${MOD}+Shift+S`, action: () => this.save(true) },
+        item("saveAs"), item("properties"), item("closeTab"),
         { separator: true },
-        { label: t("organize"), icon: "grid", action: () => this.openOrganizer() },
-        { label: t("insertFromFile"), icon: "merge", action: () => this.insertFromFile(doc.pages.length) },
-        { label: t("insertBlank"), icon: "blankPage", action: () => this.insertBlankPages() },
-        { label: t("extractPages"), icon: "extract", action: () => this.extractPages(this.selectedPages()) },
-        { label: t("splitDoc"), icon: "split", action: () => this.splitDocument() },
-        { label: t("crop"), icon: "crop", action: () => this.setTool("crop") },
-        { separator: true },
-        { label: t("pageNumbers"), icon: "hash", action: () => pageNumbersDialog(doc, this.grid.selected(), measure) },
-        { label: t("watermark"), icon: "watermark", action: () => watermarkDialog(doc, this.grid.selected(), measure) },
-        { label: t("exportImage"), icon: "fileImage", action: () => this.exportImage() },
-        { label: t("compress"), icon: "compress", action: () => this.compress() },
-        { label: t("booklet"), icon: "booklet", action: () => this.makeBooklet() },
-        { label: t("ocr"), icon: "ocr", action: () => this.recognizeText(doc.pages.map((p) => p.id)) },
-        { label: t("tableToExcel"), icon: "xlsx", action: () => this.setTool("table") },
-        { separator: true },
-        { label: t("readingMode"), icon: "reading", shortcut: `${MOD}+H`, action: () => this.toggleReading(true) },
-        { label: t("presentation"), icon: "monitor", shortcut: "F5", action: () => this.togglePresentation(true) },
-        { label: t("nightMode"), checked: this.tone === "night", action: () => this.setTone(this.tone === "night" ? "normal" : "night") },
-        { label: t("properties"), icon: "info", action: () => propertiesDialog(doc) },
-        { label: t("shortcuts"), icon: "keyboard", action: () => shortcutsDialog() },
-        { label: t("about"), icon: "file", action: () => aboutDialog(VERSION) },
+        item("commands"), item("settings"), item("shortcuts"), item("about"),
       ],
       0, 0, anchor,
     );
+  }
+
+  // ------------------------------------------------------- command search
+
+  /** Finds any command by typing part of its name (Ctrl+K). */
+  private commandPalette(): void {
+    if (document.querySelector(".palette")) return;
+    const all = [...this.cmds.values()].filter((c) => c.id !== "commands");
+    const input = h("input", { class: "input palette-input", placeholder: t("commandPlaceholder"), spellcheck: false, "aria-label": t("commandSearch") });
+    const list = h("div", { class: "palette-list", role: "listbox" });
+    let shown: Cmd[] = [];
+    let active = 0;
+    const usable = (c: Cmd) => !!this.active || !!c.always;
+    const close = () => {
+      back.remove();
+      document.removeEventListener("keydown", onKey, true);
+    };
+    const run = (c: Cmd | undefined) => {
+      if (!c || !usable(c)) return;
+      close();
+      c.run();
+    };
+    const render = () => {
+      const q = fold(input.value.trim(), false);
+      const score = (c: Cmd) => {
+        const l = fold(c.label, false);
+        const s = fold(c.short ?? "", false);
+        if (!q) return 1;
+        if (l.startsWith(q) || s.startsWith(q)) return 3;
+        if (l.split(/[\s(]+/).some((w) => w.startsWith(q))) return 2;
+        return l.includes(q) || s.includes(q) ? 1 : 0;
+      };
+      shown = all
+        .map((c) => ({ c, s: score(c) + (usable(c) ? 0.5 : 0) }))
+        .filter((x) => x.s >= 1)
+        .sort((a, b) => b.s - a.s)
+        .map((x) => x.c);
+      active = Math.min(active, Math.max(0, shown.length - 1));
+      list.replaceChildren(
+        ...(shown.length
+          ? shown.map((c, i) => {
+              const row = h("button", { class: `palette-item ${i === active ? "active" : ""}`, role: "option", disabled: !usable(c) },
+                icon(c.icon, 17), h("span", { class: "menu-label" }, c.label), c.key ? h("kbd", {}, c.key) : null);
+              row.addEventListener("click", () => run(c));
+              row.addEventListener("mousemove", () => {
+                if (active === i) return;
+                active = i;
+                list.querySelectorAll(".palette-item").forEach((x, j) => x.classList.toggle("active", j === i));
+              });
+              return row;
+            })
+          : [h("div", { class: "empty-note" }, t("noCommands"))]),
+      );
+      list.querySelector(".palette-item.active")?.scrollIntoView({ block: "nearest" });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        active = (active + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % Math.max(1, shown.length);
+        render();
+      } else if (e.key === "Enter") run(shown[active]);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    input.addEventListener("input", () => {
+      active = 0;
+      render();
+    });
+    const box = h("div", { class: "palette", role: "dialog", "aria-label": t("commandSearch") }, h("div", { class: "palette-head" }, icon("search", 17), input), list);
+    const back = h("div", { class: "modal-back palette-back show" }, box);
+    back.addEventListener("pointerdown", (e) => {
+      if (e.target === back) close();
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(back);
+    render();
+    input.focus();
+  }
+
+  // ------------------------------------------------------------- settings
+
+  private settingsDialog(): void {
+    const select = <T extends string>(value: T, options: [T, string][], onChange: (v: T) => void) => {
+      const s = h("select", { class: "input" }, ...options.map(([v, l]) => h("option", { value: v, selected: v === value }, l)));
+      s.addEventListener("change", () => onChange(s.value as T));
+      return s;
+    };
+    const row = (label: string, control: HTMLElement, hint?: string) =>
+      h("div", { class: "set-row" }, h("div", { class: "set-label" }, h("span", {}, label), hint ? h("small", {}, hint) : null), control);
+    const section = (title: string, ...rows: (HTMLElement | null)[]) => h("section", { class: "set-section" }, h("h3", {}, title), ...rows);
+    let theme = "system";
+    try {
+      theme = localStorage.getItem("laserpdf.theme") || "system";
+    } catch {
+      /* ignore */
+    }
+    const resume = h("input", { type: "checkbox", checked: prefs.resume });
+    resume.addEventListener("change", () => {
+      prefs.resume = resume.checked;
+      savePrefs();
+    });
+    const button = (label: string, fn: () => void) => h("button", { class: "btn", onclick: fn }, label);
+    const body = h("div", { class: "settings" },
+      section(t("settingsGeneral"),
+        row(t("language"), select(lang, LANGS.map((l) => [l.code, l.name] as [Lang, string]), (v) => this.switchLang(v))),
+        row(t("theme"), select(theme, [["system", t("themeSystem")], ["light", t("themeLight")], ["dark", t("themeDark")]], (v) => {
+          try {
+            localStorage.setItem("laserpdf.theme", v);
+          } catch {
+            /* ignore */
+          }
+          this.applyTheme();
+          this.buildTitlebar();
+        })),
+        row(t("pageTone"), select(this.tone, [["normal", t("toneNormal")], ["sepia", t("toneSepia")], ["night", t("toneNight")]], (v) => this.setTone(v))),
+      ),
+      section(t("settingsOpening"),
+        row(t("defaultZoom"), select(prefs.zoom, [["auto", t("fitAuto")], ["width", t("fitWidth")], ["page", t("fitPage")], ["100", "100%"]], (v: Prefs["zoom"]) => {
+          prefs.zoom = v;
+          savePrefs();
+          if (v === "100") this.viewer.zoomTo(1);
+          else this.viewer.setFit(v);
+        })),
+        row(t("defaultLayout"), select(prefs.layout, [["single", t("layoutSingle")], ["double", t("layoutDouble")], ["cover", t("layoutCover")]], (v: Layout) => {
+          prefs.layout = v;
+          savePrefs();
+          if (this.active) this.setLayout(v);
+        })),
+        row(t("resumeOpen"), resume, t("resumeOpenHint")),
+        row("", button(t("forgetPlaces"), () => {
+          clearPlaces();
+          toast(t("placesForgotten"), "success");
+        })),
+      ),
+      platform.isTauri && platform.isWindows
+        ? section(t("defaultApp"), row(t("defaultAppInfo"), this.isDefaultApp
+            ? h("span", { class: "set-done" }, icon("check", 16), t("defaultAppAlready"))
+            : button(t("defaultAppButton"), () => this.makeDefaultApp())))
+        : null,
+      platform.isTauri
+        ? section(t("recent"), row(t("recentInfo"), button(t("clearRecent"), () => {
+            localStorage.removeItem("laserpdf.recent");
+            this.buildWelcome();
+            toast(t("recentCleared"), "success");
+          })))
+        : null,
+    );
+    void modal({ title: t("settings"), body, buttons: [{ label: t("close"), value: true, primary: true }], cancelValue: false, wide: true });
+  }
+
+  /** Windows does not let apps make themselves the default; this opens the page where the user chooses. */
+  private async makeDefaultApp(): Promise<void> {
+    // The welcome strip has done its job once it is used.
+    prefs.defaultAppHidden = true;
+    savePrefs();
+    this.buildWelcome();
+    try {
+      await platform.openDefaultApps();
+      toast(t("defaultAppSteps"), "info", 10000);
+    } catch (e) {
+      console.error(e);
+      toast(t("defaultAppSteps"), "info", 10000);
+    }
+  }
+
+  private async checkDefaultApp(): Promise<void> {
+    const is = await platform.isDefaultPdfApp().catch(() => false);
+    if (is === this.isDefaultApp) return;
+    this.isDefaultApp = is;
+    this.buildWelcome();
+  }
+
+  // ------------------------------------------------------ redact, copy area
+
+  /** Covers search results with redaction boxes in one undo step. */
+  private async redactHits(hits: Hit[]): Promise<void> {
+    const doc = this.active;
+    if (!doc || !hits.length) return;
+    if (!(await confirmDialog(t("redactAll"), t("redactAllConfirm", { n: hits.length, q: this.search.query }), t("tb_whiteout"), true))) return;
+    const fill = settings.redactColor;
+    doc.change("objects", () => {
+      for (const x of hits) {
+        const box: ShapeObj = {
+          id: uid("o"), page: x.pageId, type: "shape", shape: "rect", rot: 0, opacity: 1, stroke: null, fill, width: 1, redact: true,
+          x: x.rect.x - 1, y: x.rect.y - 1, w: x.rect.w + 2, h: x.rect.h + 2,
+        };
+        doc.objects.push(box);
+      }
+    });
+    this.search.invalidate();
+    toast(t("redactAllDone", { n: hits.length }), "success", 6000);
+  }
+
+  /** Copies an area of a page, with its annotations, to the clipboard as an image. */
+  private async copyArea(ref: PageRef, r: { x: number; y: number; w: number; h: number }): Promise<void> {
+    const doc = this.active;
+    if (!doc) return;
+    const rect = displayRect(ref, r.x, r.y, r.w, r.h);
+    const png = (async () => {
+      const bytes = await this.buildBytes(doc, { pages: [ref] });
+      if (!bytes) throw new Error("cancelled");
+      const { renderArea } = await output();
+      return renderArea(bytes, rect, 200);
+    })();
+    try {
+      // The image is handed over as a promise so the click still counts as the user's permission.
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      toast(t("snapshotCopied"), "success");
+    } catch (e) {
+      console.error(e);
+      const blob = await png.catch(() => null);
+      if (!blob) return;
+      const name = `${doc.name.replace(/\.pdf$/i, "")}-${doc.pages.indexOf(ref) + 1}.png`;
+      toast(t("snapshotFailed"), "error", 8000, {
+        label: t("saveImage"),
+        run: async () => {
+          const res = await platform.saveFile(new Uint8Array(await blob.arrayBuffer()), name, null, "image/png");
+          if (res !== null) toast(t("exported"), "success");
+        },
+      });
+    }
   }
 
   // ----------------------------------------------------------- undo/redo
@@ -2078,6 +2505,11 @@ export class App {
       if (mod && k === "o") {
         e.preventDefault();
         this.openDialog();
+        return;
+      }
+      if (mod && k === "k") {
+        e.preventDefault();
+        this.commandPalette();
         return;
       }
       if (!this.active) return;
@@ -2128,6 +2560,11 @@ export class App {
         return;
       }
       if (typing) return;
+      if (e.altKey && !mod && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        this.goHistory(e.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
       // Reading mode only moves through the document; editing keys do nothing.
       if (this.reading) {
         const back = e.key === "ArrowLeft" || e.key === "PageUp";
@@ -2137,10 +2574,10 @@ export class App {
           else this.toggleReading(false);
         } else if (back || e.key === "ArrowRight" || e.key === "PageDown") {
           e.preventDefault();
-          this.viewer.scrollToPage(this.viewer.currentIndex + (back ? -1 : 1));
+          this.viewer.stepPage(back ? -1 : 1);
         } else if ((e.key === "Home" || e.key === "End") && !mod) {
           e.preventDefault();
-          this.viewer.scrollToPage(e.key === "Home" ? 0 : this.active.pages.length - 1);
+          this.cmd(e.key === "Home" ? "firstPage" : "lastPage").run();
         }
         return;
       }
@@ -2181,7 +2618,7 @@ export class App {
       }
       if (this.root.classList.contains("presenting") && (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " " || e.key === "ArrowLeft" || e.key === "ArrowUp")) {
         e.preventDefault();
-        this.viewer.scrollToPage(this.viewer.currentIndex + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1));
+        this.viewer.stepPage(e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1);
         return;
       }
       if (e.key === "Escape") {
@@ -2200,22 +2637,17 @@ export class App {
       }
       if (e.key === "PageDown" || (e.key === "ArrowRight" && !editor.selected && this.viewer.fit === "page")) {
         e.preventDefault();
-        this.viewer.scrollToPage(this.viewer.currentIndex + 1);
+        this.viewer.stepPage(1);
         return;
       }
       if (e.key === "PageUp" || (e.key === "ArrowLeft" && !editor.selected && this.viewer.fit === "page")) {
         e.preventDefault();
-        this.viewer.scrollToPage(this.viewer.currentIndex - 1);
+        this.viewer.stepPage(-1);
         return;
       }
-      if (e.key === "Home" && !mod) {
+      if ((e.key === "Home" || e.key === "End") && !mod) {
         e.preventDefault();
-        this.viewer.scrollToPage(0);
-        return;
-      }
-      if (e.key === "End" && !mod) {
-        e.preventDefault();
-        this.viewer.scrollToPage(this.active.pages.length - 1);
+        this.cmd(e.key === "Home" ? "firstPage" : "lastPage").run();
         return;
       }
       if (!mod && !e.altKey && TOOL_KEYS[k] && !this.organizerEl.classList.contains("open")) {
@@ -2311,6 +2743,17 @@ export class App {
       e.preventDefault();
       await handle(await Promise.all(files.map(platform.fileToOpened)), e.clientX, e.clientY);
     });
+  }
+
+  /** The mouse's Back and Forward side buttons move through the history. */
+  private setupMouseNav(): void {
+    const handle = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      if (e.type === "mouseup" && this.active && !document.querySelector(".modal-back")) this.goHistory(e.button === 3 ? -1 : 1);
+    };
+    document.addEventListener("mousedown", handle);
+    document.addEventListener("mouseup", handle);
   }
 
   private setupHandTool(): void {

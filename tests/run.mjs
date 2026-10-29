@@ -111,7 +111,7 @@ const server = await createServer({ server: { port: 1430, strictPort: false }, l
 await server.listen();
 const url = server.resolvedUrls.local[0];
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 
@@ -148,18 +148,32 @@ try {
     }),
   );
   check(linksOnTop.length === 2 && linksOnTop.every(Boolean), `links over text can be clicked, the first one on the page too (${linksOnTop})`);
-  check((await page.locator(".toolbar .tb-doc-tools button:not(:disabled)").count()) === 7, "page tools are on the toolbar");
-  const fits = () => page.evaluate(() => {
+  const ribbon = () => page.evaluate(() => {
     const tb = document.querySelector(".toolbar");
-    return { fits: tb.scrollWidth <= tb.clientWidth + 1, compact: tb.classList.contains("compact") };
+    return {
+      fits: [...tb.querySelectorAll(".tb-row")].every((r) => r.scrollWidth <= r.clientWidth + 1),
+      compact: tb.classList.contains("compact"),
+      labels: Array.from(tb.querySelectorAll(".ribbon .tb-label"), (e) => e.textContent),
+    };
   });
-  check((await page.locator(".toolbar .tb-label").count()) >= 20 && (await fits()).fits, "toolbar buttons have labels and the toolbar fits the window");
-  await page.setViewportSize({ width: 1920, height: 900 });
+  const tabs = await page.$$eval(".rb-tab", (b) => b.map((x) => x.dataset.tab));
+  check(tabs.join() === "home,comment,edit,pages,tools,view", `the toolbar has six tabs (${tabs})`);
+  const crowded = [];
+  for (const tab of tabs) {
+    await page.click(`.rb-tab[data-tab="${tab}"]`);
+    const r = await ribbon();
+    if (!r.fits || r.compact || r.labels.length < 6) crowded.push(tab);
+  }
+  check(!crowded.length, `every tab's tools fit the window with their names (${crowded})`);
+  await page.click('.rb-tab[data-tab="tools"]');
+  const toolNames = (await ribbon()).labels;
+  check(toolNames.includes("OCR") && toolNames.some((x) => /^(Table|Tablo)$/.test(x)), `text recognition and table export are on the Tools tab (${toolNames.join(", ")})`);
+  await page.click('.rb-tab[data-tab="home"]');
+  await page.setViewportSize({ width: 1000, height: 900 });
   await page.waitForTimeout(300);
-  const wide = await fits();
-  await page.setViewportSize({ width: 1300, height: 900 });
+  check((await ribbon()).fits, "the toolbar still fits a narrow window");
+  await page.setViewportSize({ width: 1300, height: 1000 });
   await page.waitForTimeout(300);
-  check(wide.fits && !wide.compact, "labels are shown when the window is wide");
 
   console.log("Add text");
   const p1 = await page.locator(".page").first().boundingBox();
@@ -192,7 +206,7 @@ try {
   check(Math.abs((await shapeW()) - w0 - 100 / scale) < 2, "resize handle follows the whole drag");
   await page.keyboard.press("Escape");
   await page.keyboard.press("m");
-  const lineY = p1.y + (842 - 700 + 4) * (p1.height / 842);
+  const lineY = p1.y + (842 - 700 - 4) * (p1.height / 842);
   await page.mouse.move(p1.x + 40, lineY);
   await page.mouse.down();
   await page.mouse.move(p1.x + 250, lineY, { steps: 4 });
@@ -629,14 +643,13 @@ try {
   await page.locator(".side-tab").nth(0).click();
 
   console.log("Stamps");
+  await page.click('.rb-tab[data-tab="home"]');
   await page.locator(".toolbar button", { hasText: /Stamp|Damga/ }).first().click();
   const stampMenu = await page.locator(".menu").textContent();
   check(/\d{1,2}:\d{2}/.test(stampMenu) && /name|İsimli/i.test(stampMenu), "the stamp menu has date-and-time and named stamps");
   await page.keyboard.press("Escape");
 
   console.log("Reading mode");
-  const docTools = await page.evaluate(() => Array.from(document.querySelectorAll(".tb-doc-tools .tb-label"), (e) => e.textContent));
-  check(docTools.includes("OCR") && docTools.some((x) => /^(Table|Tablo)$/.test(x)), `text recognition and table export are on the toolbar (${docTools.join(", ")})`);
   await page.locator(".viewer").click({ position: { x: 5, y: 5 } });
   await page.evaluate(() => window.laserPdf.viewer.scrollToPage(0));
   await page.keyboard.press("Control+h");
@@ -673,6 +686,111 @@ try {
   await page.evaluate(() => window.laserPdf.undo());
   const rebound = await page.evaluate(() => ({ pages: window.laserPdf.active.pages.map((p) => p.id), objects: window.laserPdf.active.objects.length }));
   check(JSON.stringify(rebound) === JSON.stringify(unbound), "undo brings back the pages and annotations from before the booklet");
+
+  console.log("Two pages side by side");
+  const tops = () => page.evaluate(() => Array.from(document.querySelectorAll(".page"), (p) => p.offsetTop));
+  await page.locator(".viewer").click({ position: { x: 5, y: 5 } });
+  await page.evaluate(() => window.laserPdf.viewer.scrollToPage(0));
+  await page.click('.statusbar [data-cmd="layoutDouble"]');
+  let t3 = await tops();
+  check(t3[0] === t3[1] && t3[2] > t3[1], `pages 1 and 2 sit side by side (${t3})`);
+  await page.keyboard.press("PageDown");
+  await page.waitForFunction(() => window.laserPdf.viewer.currentIndex === 2, null, { timeout: 3000 }).catch(() => {});
+  check((await page.evaluate(() => window.laserPdf.viewer.currentIndex)) === 2, "Page Down moves to the next pair of pages");
+  await page.click('.statusbar [data-cmd="layoutCover"]');
+  t3 = await tops();
+  check(t3[1] > t3[0] && t3[1] === t3[2], `with a cover, page 1 is alone and pages 2 and 3 are a pair (${t3})`);
+  await page.click('.statusbar [data-cmd="layoutSingle"]');
+  t3 = await tops();
+  check(t3[1] > t3[0] && t3[2] > t3[1], "single pages are below each other again");
+
+  console.log("Back and forward");
+  await page.evaluate(() => window.laserPdf.viewer.scrollToPage(0));
+  await page.fill(".page-input", "3");
+  await page.press(".page-input", "Enter");
+  await page.waitForFunction(() => window.laserPdf.viewer.currentIndex === 2, null, { timeout: 3000 });
+  check(!(await page.locator('.statusbar [data-cmd="goBack"]').isDisabled()), "going to a page number can be undone with Back");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForFunction(() => window.laserPdf.viewer.currentIndex === 0, null, { timeout: 3000 }).catch(() => {});
+  check((await page.evaluate(() => window.laserPdf.viewer.currentIndex)) === 0, "Alt+Left goes back to page 1");
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.waitForFunction(() => window.laserPdf.viewer.currentIndex === 2, null, { timeout: 3000 }).catch(() => {});
+  check((await page.evaluate(() => window.laserPdf.viewer.currentIndex)) === 2, "Alt+Right goes forward to page 3 again");
+
+  console.log("Reopening where a file was left");
+  const openWithPath = () => page.evaluate(async (bytes) => {
+    await window.laserPdf.openFiles([{ name: "resume.pdf", path: "C:\\docs\\resume.pdf", bytes: new Uint8Array(bytes) }]);
+  }, Array.from(readFileSync(sample)));
+  await openWithPath();
+  await page.waitForTimeout(200);
+  await page.evaluate(() => window.laserPdf.viewer.scrollToPage(2));
+  await page.evaluate(() => window.laserPdf.closeDoc(window.laserPdf.active));
+  await openWithPath();
+  await page.waitForTimeout(300);
+  const resumed = await page.evaluate(() => ({ i: window.laserPdf.viewer.currentIndex, name: window.laserPdf.active.name }));
+  check(resumed.name === "resume.pdf" && resumed.i === 2, `a file opens again at the page it was left on (page ${resumed.i + 1})`);
+  check(/3/.test(await page.locator(".toast").last().textContent()), "and says which page that is");
+  await page.evaluate(() => window.laserPdf.closeDoc(window.laserPdf.active));
+
+  console.log("Find and redact");
+  const redactBoxes = () => page.evaluate(() => window.laserPdf.active.objects.filter((o) => o.redact).length);
+  const boxesBefore = await redactBoxes();
+  await page.keyboard.press("Control+f");
+  await page.fill(".search-input", "Line 3 on");
+  await page.waitForSelector(".search-redact:not([disabled])", { timeout: 10000 });
+  const found = Number((await page.locator(".search-count").textContent()).split("/").pop());
+  await page.click(".search-redact");
+  await modalPrimary();
+  check(found >= 1 && (await redactBoxes()) - boxesBefore === found, `every result is covered with a redaction box (${found})`);
+  await page.waitForFunction(() => document.querySelector(".search-count").classList.contains("none"), null, { timeout: 10000 }).catch(() => {});
+  check(await page.locator(".search-count").evaluate((e) => e.classList.contains("none")), "the redacted text is no longer found");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.laserPdf.undo());
+  check((await redactBoxes()) === boxesBefore, "one undo removes all the boxes");
+
+  console.log("Copy an area as an image");
+  await page.evaluate(() => {
+    window.__clip = null;
+    navigator.clipboard.write = async (items) => {
+      window.__clip = await items[0].getType("image/png");
+    };
+    window.laserPdf.viewer.scrollToPage(0);
+    window.laserPdf.setTool("snapshot");
+  });
+  check((await page.locator(".st-hint").textContent()).length > 10, "the status bar explains the tool");
+  const area = await page.locator(".page").first().boundingBox();
+  await page.mouse.move(area.x + 40, area.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(area.x + 240, area.y + 140, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(() => window.__clip, null, { timeout: 10000 });
+  const clip = await page.evaluate(async () => {
+    const b = await createImageBitmap(window.__clip);
+    return { w: b.width, h: b.height, scale: window.laserPdf.viewer.scale, tool: document.querySelector(".stage").dataset.tool };
+  });
+  const expectW = Math.round((200 / clip.scale) * (200 / 72));
+  check(Math.abs(clip.w - expectW) <= 3 && Math.abs(clip.h - expectW / 2) <= 3, `the area is copied as a 200 dpi image (${clip.w} × ${clip.h}, expected about ${expectW} × ${Math.round(expectW / 2)})`);
+  check(clip.tool === "select", "the tool goes back to Select afterwards");
+
+  console.log("Command search");
+  const rotLabel = await page.evaluate(() => window.laserPdf.cmds.get("rotateRight").label);
+  const rots = () => page.evaluate(() => window.laserPdf.active.pages.reduce((n, p) => n + p.rot, 0));
+  const rotBefore = await rots();
+  await page.keyboard.press("Control+k");
+  await page.keyboard.type(rotLabel.slice(0, 6));
+  check((await page.locator(".palette-item").first().textContent()).includes(rotLabel), `typing part of a name finds the command (${rotLabel})`);
+  await page.keyboard.press("Enter");
+  check((await rots()) === rotBefore + 90 && !(await page.locator(".palette").count()), "Enter runs it and closes the search");
+  await page.evaluate(() => window.laserPdf.undo());
+
+  console.log("Settings");
+  await page.evaluate(() => window.laserPdf.settingsDialog());
+  await page.waitForSelector(".modal-back.show .settings");
+  const zoomSelect = page.locator(".settings select").nth(3);
+  await zoomSelect.selectOption("page");
+  check(await page.evaluate(() => window.laserPdf.viewer.fit === "page" && JSON.parse(localStorage.getItem("laserpdf.prefs")).zoom === "page"), "the default zoom applies at once and is kept");
+  await zoomSelect.selectOption("auto");
+  await modalPrimary();
 
   console.log("Text recognition");
   // A "scan": text drawn on an A4 bitmap at the given dpi, opened as an image.
@@ -735,7 +853,7 @@ try {
       },
     };
   };
-  const desk = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  const desk = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
   desk.on("pageerror", (e) => errors.push("desktop: " + e.message));
   await desk.addInitScript(fakeDesktop, []);
   await desk.goto(url);
@@ -758,7 +876,7 @@ try {
   check(writes, "nothing is written again while the document is unchanged");
   await desk.close();
   // The app "crashed": a new start finds the files.
-  const again = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  const again = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
   again.on("pageerror", (e) => errors.push("desktop: " + e.message));
   await again.addInitScript(fakeDesktop, left);
   await again.goto(url);

@@ -11,6 +11,8 @@ import {
   FileOutput, Minimize2, Images, CopyPlus, Wrench, ArrowUpDown, Lock, PenLine, CaseSensitive, Clock,
   Monitor, ListTree, Layers, ScanText, FileSpreadsheet, Crop, Link, BookOpen, BookmarkPlus, ArrowUp, ArrowDown,
   ListIndentIncrease, ListIndentDecrease, UserCheck, History, BookOpenText, Expand, Shrink, Palette,
+  ArrowLeft, ArrowRight, Settings, Columns2, RectangleVertical, Command, TextSearch, Scaling, BookCopy,
+  SquareDashedMousePointer,
 } from "lucide";
 
 const ICONS: Record<string, IconNode> = {
@@ -32,6 +34,8 @@ const ICONS: Record<string, IconNode> = {
   crop: Crop, link: Link, booklet: BookOpen, bookmarkPlus: BookmarkPlus, arrowUp: ArrowUp, arrowDown: ArrowDown,
   indent: ListIndentIncrease, outdent: ListIndentDecrease, userStamp: UserCheck, history: History,
   reading: BookOpenText, expand: Expand, shrink: Shrink, palette: Palette,
+  navBack: ArrowLeft, navForward: ArrowRight, settings: Settings, double: Columns2, single: RectangleVertical,
+  cover: BookCopy, command: Command, findRedact: TextSearch, fitAuto: Scaling, snapshot: SquareDashedMousePointer,
 };
 
 /** A table over an "XLSX" label: says what the export makes. */

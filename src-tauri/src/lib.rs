@@ -90,6 +90,46 @@ fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|e| e.to_string())
 }
 
+/// Opens Windows Settings at "Default apps". Apps cannot make themselves the default; the user chooses there.
+#[tauri::command]
+fn open_default_apps() -> Result<(), String> {
+    #[cfg(windows)]
+    std::process::Command::new("explorer.exe")
+        .arg("ms-settings:defaultapps")
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Whether double-clicked PDFs open in LaserPDF, from either the installer or the Store package.
+#[tauri::command]
+fn is_default_pdf_app() -> bool {
+    #[cfg(windows)]
+    {
+        use winreg::{enums::*, RegKey};
+        let exts = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf");
+        // Newer Windows 11 builds keep the choice in UserChoiceLatest.
+        let prog: Option<String> = exts.ok().and_then(|k| {
+            ["UserChoiceLatest", "UserChoice"]
+                .iter()
+                .find_map(|c| k.open_subkey(c).ok()?.get_value("ProgId").ok())
+        });
+        let Some(prog) = prog else { return false };
+        let classes = RegKey::predef(HKEY_CLASSES_ROOT);
+        let names_us = |path: String, value: &str| {
+            classes
+                .open_subkey(path)
+                .and_then(|k| k.get_value::<String, _>(value))
+                .is_ok_and(|v| v.to_lowercase().contains("laserpdf"))
+        };
+        // Installed copy: the open command runs laserpdf.exe. Store copy: an AppX class naming our package.
+        return names_us(format!(r"{prog}\shell\open\command"), "") || names_us(format!(r"{prog}\Application"), "AppUserModelID");
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
 fn file_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
         .filter(|a| !a.starts_with('-'))
@@ -143,7 +183,7 @@ pub fn run() {
         .manage(Pending(Mutex::new(Vec::new())))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![read_file, write_file, startup_files, print_page, recovery_dir, recovery_list, recovery_remove])
+        .invoke_handler(tauri::generate_handler![read_file, write_file, startup_files, print_page, recovery_dir, recovery_list, recovery_remove, open_default_apps, is_default_pdf_app])
         .build(tauri::generate_context!())
         .expect("error while building LaserPDF")
         .run(|_app, _event| {

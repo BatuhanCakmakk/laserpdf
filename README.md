@@ -25,12 +25,16 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 
 ### Viewing
 - Fast on-demand rendering: documents with hundreds of pages open instantly
-- Zoom (Ctrl + wheel, fit width or page), page navigation, thumbnails and bookmarks panel
+- Zoom (Ctrl + wheel, automatic, fit width or page), page navigation, thumbnails and bookmarks panel
+- One page, two pages side by side, or two pages with the cover alone
+- Back and forward (Alt+← / Alt+→ or the mouse side buttons) after following a link, a bookmark or a page number
+- Files reopen at the page and zoom where you left them
 - Search (Turkish İ/ı aware), select and copy text
 - Links (internal links jump to the page, external links open in the browser)
 - Tabs for several documents, recent files, presentation mode (F5)
 - Reading mode (Ctrl+H): only the pages and a small bar, a comfortable page width, normal, sepia or night page tone, full screen
 - Opening another PDF while LaserPDF is running opens it in a new tab
+- Tools grouped in tabs (Home, Comment, Edit, Pages, Tools, View), **command search** (Ctrl+K) to find any action by name, and a Settings window (default zoom and page layout, language, theme, default PDF app)
 
 ### Editing
 - **Edit existing text:** click a line and type. The old text is removed from the page and the new text is written in its place without damaging colored or patterned backgrounds. Size, color and bold/italic are kept; the font is replaced with the closest match (letter widths are identical for Arial/Helvetica, Times, Courier and Calibri).
@@ -40,7 +44,7 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 - **Stamps:** APPROVED, DRAFT, CONFIDENTIAL, date or date and time, your own text, or a stamp with your name and the date and time
 - **Markup:** highlight, underline and strike out text; pen and highlighter
 - **Shapes:** rectangle, ellipse, line, arrow (color, fill, width, opacity)
-- **Redact:** draw a black or white box; the text and links under it are deleted from the file when you save. If something under it cannot be removed (an image, a scanned page, a form field), LaserPDF offers to turn that page into an image
+- **Redact:** draw a black or white box; the text and links under it are deleted from the file when you save. **Find and redact** covers every result of a search at once. If something under it cannot be removed (an image, a scanned page, a form field), LaserPDF offers to turn that page into an image
 - **Links:** draw an area that opens a web address or goes to a page of the document
 - **Sticky notes** saved as real PDF note annotations
 - **Form filling:** text fields, checkboxes and drop-down lists
@@ -66,7 +70,7 @@ A lightweight, fast **PDF viewer and editor for Windows**. It edits the text tha
 - **Remove hidden information** on save: creator program, dates, XMP data, comment authors and the location/camera data of photos. Location data of inserted photos is always removed
 - **Text recognition (OCR):** recognizes scanned pages and adds an invisible text layer, so the text can be searched, selected and copied. English and Turkish, fully offline (Tesseract). Suggested when a scanned document is opened; scans below 150 dpi get an explanation instead of a long, failing run
 - **Table to Excel:** draw a box around a table and save it as .xlsx. Ruled tables use the lines on the page, other tables the position of the text; amounts become numbers, codes and dates stay text. Scanned tables can be exported after text recognition
-- Export a page as PNG/JPEG, reduce file size (by rasterizing scanned documents), print
+- Export a page as PNG/JPEG, copy an area of a page to the clipboard as an image, reduce file size (by rasterizing scanned documents), print
 - Open password-protected PDFs
 
 ## Install
@@ -154,6 +158,8 @@ LaserPDF works offline. It has no account, no ads, no analytics and makes no net
 | Ctrl+O / Ctrl+S / Ctrl+Shift+S | Open / Save / Save as |
 | Ctrl+P | Print |
 | Ctrl+F | Search |
+| Ctrl+K | Command search |
+| Alt+← / Alt+→ | Back / Forward |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl + / Ctrl − / Ctrl+0 | Zoom in / Zoom out / 100% |
 | Ctrl+Tab, Ctrl+W | Switch tabs, close tab |
