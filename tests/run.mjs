@@ -148,6 +148,16 @@ try {
     }),
   );
   check(linksOnTop.length === 2 && linksOnTop.every(Boolean), `links over text can be clicked, the first one on the page too (${linksOnTop})`);
+  // The top of page 1 holds only black text. Subpixel (ClearType) smoothing would tint its edges.
+  const tinted = await page.evaluate(() => {
+    const c = document.querySelector(".page:first-child .page-raster");
+    const h = Math.round(c.height * (842 - 560) / 842);
+    const d = c.getContext("2d").getImageData(0, 0, c.width, h).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]) > 40) n++;
+    return n;
+  });
+  check(tinted === 0, `black text is drawn without coloured edges (${tinted} tinted pixels)`);
   const ribbon = () => page.evaluate(() => {
     const tb = document.querySelector(".toolbar");
     return {

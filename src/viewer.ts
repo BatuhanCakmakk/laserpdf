@@ -558,7 +558,10 @@ export class Viewer {
       canvas.width = Math.round((parseFloat(pv.el.style.width) || viewport.width) * ratio);
       canvas.height = Math.round((parseFloat(pv.el.style.height) || viewport.height) * ratio);
       canvas.className = "page-raster";
-      const ctx = canvas.getContext("2d", { alpha: false })!;
+      // Not alpha: false. On an opaque canvas Chromium draws text with subpixel (ClearType) smoothing,
+      // which leaves coloured specks along the letters at small sizes. The white background still
+      // makes every pixel opaque, but the browser then uses greyscale smoothing like other viewers.
+      const ctx = canvas.getContext("2d")!;
       const sx = canvas.width / viewport.width;
       const sy = canvas.height / viewport.height;
       const task = (pv.erased ?? page).render({

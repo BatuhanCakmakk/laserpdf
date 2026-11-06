@@ -32,7 +32,7 @@ import { Recovery } from "./recovery";
 import { PasswordCancelled, getTextItems } from "./engine";
 import { ensureFonts } from "./fonts";
 
-export const VERSION = "1.3.0";
+export const VERSION = "1.3.1";
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
 interface ToolDef {
